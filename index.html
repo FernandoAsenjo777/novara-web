@@ -236,6 +236,10 @@
     const SAT=["https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg"];
     // Ortofoto alta resolución de España (IGN PNOA, gratis, ~0,5 m) — encima del Sentinel-2 mundial.
     const PNOA=["https://www.ign.es/wmts/pnoa-ma?Service=WMTS&Request=GetTile&Version=1.0.0&Layer=OI.OrthoimageCoverage&Style=default&Format=image/jpeg&TileMatrixSet=GoogleMapsCompatible&TileMatrix={z}&TileCol={x}&TileRow={y}"];
+    // PNOA es España y en JPEG (sin transparencia): fuera de España devuelve teselas EN BLANCO que
+    // taparían el satélite mundial. Acotamos su carga a España (penín.+Baleares+Canarias) → fuera,
+    // solo Sentinel-2. bounds = [oeste, sur, este, norte].
+    const SPAIN_BOUNDS=[-18.3, 27.5, 4.4, 44.0];
     const SENDAS=["https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png"];
     // Aventura = OpenFreeMap "liberty" (vector, con relieve, rápido). OpenTopoMap (raster lento/feo) RETIRADO.
     const STYLES={ aventura:"https://tiles.openfreemap.org/styles/liberty", mapa:"https://tiles.openfreemap.org/styles/bright", noche:"https://tiles.openfreemap.org/styles/dark" };
@@ -251,7 +255,7 @@
           // tiles inexistentes a z15+ → 404 → mapa NEGRO. Con maxzoom hace overzoom (estira el
           // último tile, nunca negro). PNOA (España, 0,5 m) sí llega nítido a z19.
           sat:{ type:"raster", tiles:SAT, tileSize:256, maxzoom:14, attribution:"Sentinel-2 cloudless · EOX (CC-BY) · ESA" },
-          pnoa:{ type:"raster", tiles:PNOA, tileSize:256, maxzoom:19, attribution:"PNOA © Instituto Geográfico Nacional de España" },
+          pnoa:{ type:"raster", tiles:PNOA, tileSize:256, maxzoom:19, bounds:SPAIN_BOUNDS, attribution:"PNOA © Instituto Geográfico Nacional de España" },
           omt:{ type:"vector", url:OMT_PLANET }
         },
         layers:[
@@ -270,18 +274,35 @@
     map.on("error", e=>showErr("mapa: "+(e.error&&e.error.message)));
 
     // ===== Relieve desde DEM gratis (terrarium): curvas de nivel + hillshade + 3D =====
-    const demSource=new mlcontour.DemSource({ url:"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png", encoding:"terrarium", maxzoom:14, worker:true });
+    const TERRARIUM="https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+    const demSource=new mlcontour.DemSource({ url:TERRARIUM, encoding:"terrarium", maxzoom:13, worker:true });
     demSource.setupMaplibre(maplibregl);
-    let showContours=true, is3D=false, showPeaks=true;
-    function ensureDem(){ if(!map.getSource("dem")) map.addSource("dem",{ type:"raster-dem", encoding:"terrarium", tiles:[demSource.sharedDemProtocolUrl], maxzoom:14, tileSize:256 }); }
+    let showContours=true, is3D=false, showPeaks=true, flavorBefore3D=null;
+    // Malla del terreno: terrarium DIRECTO (MapLibre lo decodifica nativo, sin pasar por el worker
+    // de mlcontour) → mucho más fluido al mover el mapa en 3D. maxzoom 13 = ligero y rápido.
+    function ensureDem(){ if(!map.getSource("dem")) map.addSource("dem",{ type:"raster-dem", encoding:"terrarium", tiles:[TERRARIUM], maxzoom:13, tileSize:256 }); }
     function firstSymbol(){ const s=map.getStyle().layers.find(l=>l.type==="symbol"); return s?s.id:undefined; }
     function ensureHillshade(){ if(currentFlavor==="satelite") return; ensureDem(); if(!map.getLayer("hillshade")) map.addLayer({ id:"hillshade", type:"hillshade", source:"dem", minzoom:6, paint:{ "hillshade-exaggeration":0.35 } }, firstSymbol()); }
+    // Satélite drapeado para 3D: capas raster (Sentinel-2 + PNOA España) por DEBAJO de los símbolos,
+    // así el relieve se ve con imagen real y los nombres de cumbres quedan encima. Solo en 3D y si la
+    // capa base no es ya satélite. IDs propios (sat3d) para no chocar con el estilo satélite.
+    function ensureSatOverlay(){ const want = is3D && currentFlavor!=="satelite";
+      if(want){
+        if(!map.getSource("sat3d")) map.addSource("sat3d",{ type:"raster", tiles:SAT, tileSize:256, maxzoom:14, attribution:"Sentinel-2 cloudless · EOX (CC-BY) · ESA" });
+        if(!map.getSource("pnoa3d")) map.addSource("pnoa3d",{ type:"raster", tiles:PNOA, tileSize:256, maxzoom:19, bounds:SPAIN_BOUNDS, attribution:"PNOA © Instituto Geográfico Nacional de España" });
+        const before=firstSymbol();
+        if(!map.getLayer("sat3d-l")) map.addLayer({ id:"sat3d-l", type:"raster", source:"sat3d" }, before);
+        if(!map.getLayer("pnoa3d-l")) map.addLayer({ id:"pnoa3d-l", type:"raster", source:"pnoa3d", minzoom:7 }, before);
+      } else {
+        ["sat3d-l","pnoa3d-l"].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); });
+        ["sat3d","pnoa3d"].forEach(id=>{ if(map.getSource(id)){ try{ map.removeSource(id); }catch(e){} } });
+      } }
     function ensureContours(){ if(!showContours || currentFlavor==="satelite" || is3D){ ["contour-labels","contour-lines"].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); }); return; }
       if(!map.getSource("contours")) map.addSource("contours",{ type:"vector", maxzoom:15, tiles:[ demSource.contourProtocolUrl({ multiplier:1, thresholds:{ 10:[500,2000], 11:[200,1000], 12:[100,500], 13:[100,500], 14:[50,250], 15:[20,100] }, elevationKey:"ele", levelKey:"level", contourLayer:"contours" }) ] });
       const before=firstSymbol();
       if(!map.getLayer("contour-lines")) map.addLayer({ id:"contour-lines", type:"line", source:"contours", "source-layer":"contours", minzoom:10, paint:{ "line-color":"rgba(150,110,70,.55)", "line-width":["match",["get","level"],1,1.4,0.6] } }, before);
       if(!map.getLayer("contour-labels")) map.addLayer({ id:"contour-labels", type:"symbol", source:"contours", "source-layer":"contours", minzoom:12, filter:[">",["get","level"],0], layout:{ "symbol-placement":"line", "text-field":["concat",["to-string",["get","ele"]]," m"], "text-font":["Noto Sans Regular"], "text-size":10, "text-max-angle":25 }, paint:{ "text-color":"#c79a64", "text-halo-color":"#0c100e", "text-halo-width":1 } }); }
-    function applyTerrain(animate){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.45 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(animate && map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky({ "sky-color":"#0c100e","horizon-color":"#0c100e","fog-color":"#0c100e","fog-ground-blend":0,"horizon-fog-blend":0,"sky-horizon-blend":0 }); }catch(e){} }
+    function applyTerrain(animate){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.4 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(animate && map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky({ "sky-color":"#0c100e","horizon-color":"#0c100e","fog-color":"#0c100e","fog-ground-blend":0,"horizon-fog-blend":0,"sky-horizon-blend":0 }); }catch(e){} }
       ensureContours(); } // en 3D ocultamos las curvas (sobre el relieve parecen terrazas); al salir, vuelven
     // Cumbres: nombre + altitud de los picos (datos OSM, gratis) — lo que PeakVisor cobra
     function peakSource(){ const s=map.getStyle().sources||{}; return s.openmaptiles?"openmaptiles":(s.omt?"omt":null); }
@@ -301,14 +322,31 @@
     // Cambio de capa robusto: entre vector (liberty) y raster (satélite) el "style diff" de
     // MapLibre revienta (_checkLoaded / AbortError) → forzamos rebuild limpio (diff:false) y
     // bloqueamos clicks mientras se reconstruye, para que no se solapen dos setStyle.
-    let styleSwitching=false;
-    function setFlavor(flavor){ if(styleSwitching||flavor===currentFlavor) return; styleSwitching=true; currentFlavor=flavor; map.setStyle(buildStyle(flavor),{diff:false}); }
+    // Bloqueo durante el cambio de estilo CON failsafe: si style.load no llega (carreras raras),
+    // se desbloquea solo a los 3,5 s → nunca se queda atascado el cambio de capa.
+    let styleSwitching=false, switchTimer=null;
+    function setFlavor(flavor){ if(styleSwitching||flavor===currentFlavor) return; styleSwitching=true; currentFlavor=flavor;
+      clearTimeout(switchTimer); switchTimer=setTimeout(()=>{ styleSwitching=false; }, 3500);
+      map.setStyle(buildStyle(flavor),{diff:false}); }
+    // Refleja la capa elegida en los botones y cambia el estilo (mismo camino para botón y para 3D).
+    function selectFlavor(flavor){ document.querySelectorAll(".lp[data-flavor]").forEach(x=>x.classList.toggle("on", x.dataset.flavor===flavor)); setFlavor(flavor); }
+    // Aplica el terreno EN CUANTO el estilo esté listo (sondeo de isStyleLoaded, no dependemos del
+    // evento style.load que a veces no llega tras un cambio de estilo) → robusto de verdad.
+    function whenStyleReady(cb){ let n=0; const t=()=>{ n++; let ok=false; try{ ok=map.isStyleLoaded(); }catch(e){} if(ok){ try{ cb(); }catch(e){} } else if(n<120) setTimeout(t,80); }; setTimeout(t,80); }
     document.querySelectorAll(".lp[data-flavor]").forEach(b=>b.addEventListener("click",()=>{
-      document.querySelectorAll(".lp[data-flavor]").forEach(x=>x.classList.remove("on"));
-      b.classList.add("on"); setFlavor(b.dataset.flavor); $("layerPicker").classList.remove("open"); }));
+      flavorBefore3D=null; selectFlavor(b.dataset.flavor); $("layerPicker").classList.remove("open"); }));
     $("curvasChip").onclick=()=>{ showContours=!showContours; $("curvasChip").classList.toggle("on",showContours); ensureContours(); };
     $("peaksChip").onclick=()=>{ showPeaks=!showPeaks; $("peaksChip").classList.toggle("on",showPeaks); ensurePeaks(); };
-    $("d3Chip").onclick=()=>{ is3D=!is3D; $("d3Chip").classList.toggle("on",is3D); applyTerrain(true); };
+    // 3D = montaña fotorrealista: al activarlo salta a satélite (imagen real sobre el relieve); al
+    // salir, vuelve a tu capa. El terreno se aplica con whenStyleReady (no se queda a medias).
+    // 3D = montaña fotorrealista. En vez de cambiar de estilo (frágil), DRAPAMOS el satélite como
+    // capas encima del mapa actual + relieve. Sin setStyle → sin carreras ni cuelgues. Al salir, se
+    // quita el satélite y el mapa vuelve plano a tu capa.
+    $("d3Chip").onclick=()=>{ is3D=!is3D; $("d3Chip").classList.toggle("on",is3D);
+      ensureSatOverlay(); ensureContours(); applyTerrain(false); // pone/quita relieve SIN tocar la cámara
+      // El inclinado lo controlamos aquí, explícito y fiable (no dentro de applyTerrain, que se pisa).
+      if(is3D){ if(map.getPitch()<30) map.easeTo({ pitch:62, duration:650 }); }
+      else setTimeout(()=>{ if(map.getPitch()>2) map.easeTo({ pitch:0, bearing:0, duration:450 }); }, 80); };
     $("sendasChip").onclick=()=>{ sendasOn=!sendasOn; $("sendasChip").classList.toggle("on",sendasOn);
       if(sendasOn) ensureSendas(); else { if(map.getLayer("sendas-layer")) map.removeLayer("sendas-layer"); if(map.getSource("sendas")) map.removeSource("sendas"); } };
 
@@ -321,8 +359,8 @@
     function ensureSendas(){ if(!sendasOn) return;
       if(!map.getSource("sendas")) map.addSource("sendas",{type:"raster",tiles:SENDAS,tileSize:256,attribution:"© Waymarked Trails (CC-BY-SA)"});
       if(!map.getLayer("sendas-layer")) map.addLayer({id:"sendas-layer",type:"raster",source:"sendas",paint:{"raster-opacity":0.85}}); }
-    function addOverlays(){ ensureHillshade(); ensureContours(); ensurePeaks(); ensureRouteLayer(); ensureTrackLayer(); ensureSendas(); }
-    map.on("style.load", ()=>{ styleSwitching=false; addOverlays(); applyTerrain(false); updateCompass(); collapseAttrib(); setTimeout(addOverlays,700); });
+    function addOverlays(){ ensureHillshade(); ensureSatOverlay(); ensureContours(); ensurePeaks(); ensureRouteLayer(); ensureTrackLayer(); ensureSendas(); }
+    map.on("style.load", ()=>{ styleSwitching=false; clearTimeout(switchTimer); addOverlays(); applyTerrain(false); updateCompass(); collapseAttrib(); setTimeout(addOverlays,700); });
     map.on("idle", addOverlays); // robusto: garantiza overlays (cumbres, curvas…) cuando el mapa se asienta
 
     // ===== brújula (orientación del mapa) + reset norte =====
