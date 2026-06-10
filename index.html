@@ -184,7 +184,7 @@
       return STYLES[f]||STYLES.aventura;
     }
 
-    const map=new maplibregl.Map({ container:"map", style:buildStyle("aventura"), center:[-3.70,40.42], zoom:5.4, attributionControl:false });
+    const map=new maplibregl.Map({ container:"map", style:buildStyle("aventura"), center:[-3.70,40.42], zoom:5.4, maxPitch:80, attributionControl:false });
     // Atribución legal obligatoria (OSM/OpenFreeMap) pero colapsada a un (i) discreto, no un texto fijo.
     map.addControl(new maplibregl.AttributionControl({ compact:true }), "bottom-right");
     const collapseAttrib=()=>{ const at=document.querySelector(".maplibregl-ctrl-attrib"); if(at) at.classList.remove("maplibregl-compact-show"); };
@@ -197,17 +197,18 @@
     let showContours=true, is3D=false, showPeaks=true;
     function ensureDem(){ if(!map.getSource("dem")) map.addSource("dem",{ type:"raster-dem", encoding:"terrarium", tiles:[demSource.sharedDemProtocolUrl], maxzoom:13, tileSize:256 }); }
     function firstSymbol(){ const s=map.getStyle().layers.find(l=>l.type==="symbol"); return s?s.id:undefined; }
-    function ensureHillshade(){ if(currentFlavor==="satelite") return; ensureDem(); if(!map.getLayer("hillshade")) map.addLayer({ id:"hillshade", type:"hillshade", source:"dem", paint:{ "hillshade-exaggeration":0.35 } }, firstSymbol()); }
+    function ensureHillshade(){ if(currentFlavor==="satelite") return; ensureDem(); if(!map.getLayer("hillshade")) map.addLayer({ id:"hillshade", type:"hillshade", source:"dem", minzoom:6, paint:{ "hillshade-exaggeration":0.35 } }, firstSymbol()); }
     function ensureContours(){ if(!showContours){ ["contour-labels","contour-lines"].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); }); return; }
       if(!map.getSource("contours")) map.addSource("contours",{ type:"vector", maxzoom:15, tiles:[ demSource.contourProtocolUrl({ multiplier:1, thresholds:{ 10:[500,2000], 11:[200,1000], 12:[100,500], 13:[100,500], 14:[50,250], 15:[20,100] }, elevationKey:"ele", levelKey:"level", contourLayer:"contours" }) ] });
       const before=firstSymbol();
-      if(!map.getLayer("contour-lines")) map.addLayer({ id:"contour-lines", type:"line", source:"contours", "source-layer":"contours", paint:{ "line-color":"rgba(150,110,70,.55)", "line-width":["match",["get","level"],1,1.4,0.6] } }, before);
-      if(!map.getLayer("contour-labels")) map.addLayer({ id:"contour-labels", type:"symbol", source:"contours", "source-layer":"contours", filter:[">",["get","level"],0], layout:{ "symbol-placement":"line", "text-field":["concat",["to-string",["get","ele"]]," m"], "text-font":["Noto Sans Regular"], "text-size":10, "text-max-angle":25 }, paint:{ "text-color":"#c79a64", "text-halo-color":"#0c100e", "text-halo-width":1 } }); }
-    function applyTerrain(){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.5 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky(null); }catch(e){} map.easeTo({ pitch:0 }); } }
+      if(!map.getLayer("contour-lines")) map.addLayer({ id:"contour-lines", type:"line", source:"contours", "source-layer":"contours", minzoom:10, paint:{ "line-color":"rgba(150,110,70,.55)", "line-width":["match",["get","level"],1,1.4,0.6] } }, before);
+      if(!map.getLayer("contour-labels")) map.addLayer({ id:"contour-labels", type:"symbol", source:"contours", "source-layer":"contours", minzoom:12, filter:[">",["get","level"],0], layout:{ "symbol-placement":"line", "text-field":["concat",["to-string",["get","ele"]]," m"], "text-font":["Noto Sans Regular"], "text-size":10, "text-max-angle":25 }, paint:{ "text-color":"#c79a64", "text-halo-color":"#0c100e", "text-halo-width":1 } }); }
+    function applyTerrain(animate){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.5 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(animate && map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky(null); }catch(e){} } }
     // Cumbres: nombre + altitud de los picos (datos OSM, gratis) — lo que PeakVisor cobra
+    function peakSource(){ const s=map.getStyle().sources||{}; return s.openmaptiles?"openmaptiles":(s.omt?"omt":null); }
     function ensurePeaks(){ if(!showPeaks){ if(map.getLayer("peaks")) map.removeLayer("peaks"); return; }
-      if(!map.getSource("peaksrc")) map.addSource("peaksrc",{ type:"vector", url:"https://tiles.openfreemap.org/planet" });
-      if(!map.getLayer("peaks")) map.addLayer({ id:"peaks", type:"symbol", source:"peaksrc", "source-layer":"mountain_peak", minzoom:7,
+      const src=peakSource(); if(!src) return;
+      if(!map.getLayer("peaks")) map.addLayer({ id:"peaks", type:"symbol", source:src, "source-layer":"mountain_peak", minzoom:9,
         layout:{ "text-field":["concat","▲ ",["coalesce",["get","name"],""],["case",["has","ele"],["concat","  ",["to-string",["round",["to-number",["get","ele"]]]],"m"],""]],
           "text-font":["Noto Sans Regular"], "text-size":11, "text-anchor":"top", "text-offset":[0,0.2], "text-max-width":9,
           "symbol-sort-key":["case",["has","rank"],["to-number",["get","rank"]],99] },
@@ -223,7 +224,7 @@
       b.classList.add("on"); currentFlavor=b.dataset.flavor; map.setStyle(buildStyle(currentFlavor)); $("layerPicker").classList.remove("open"); }));
     $("curvasChip").onclick=()=>{ showContours=!showContours; $("curvasChip").classList.toggle("on",showContours); ensureContours(); };
     $("peaksChip").onclick=()=>{ showPeaks=!showPeaks; $("peaksChip").classList.toggle("on",showPeaks); ensurePeaks(); };
-    $("d3Chip").onclick=()=>{ is3D=!is3D; $("d3Chip").classList.toggle("on",is3D); applyTerrain(); };
+    $("d3Chip").onclick=()=>{ is3D=!is3D; $("d3Chip").classList.toggle("on",is3D); applyTerrain(true); };
     $("sendasChip").onclick=()=>{ sendasOn=!sendasOn; $("sendasChip").classList.toggle("on",sendasOn);
       if(sendasOn) ensureSendas(); else { if(map.getLayer("sendas-layer")) map.removeLayer("sendas-layer"); if(map.getSource("sendas")) map.removeSource("sendas"); } };
 
@@ -236,7 +237,7 @@
     function ensureSendas(){ if(!sendasOn) return;
       if(!map.getSource("sendas")) map.addSource("sendas",{type:"raster",tiles:SENDAS,tileSize:256,attribution:"© Waymarked Trails (CC-BY-SA)"});
       if(!map.getLayer("sendas-layer")) map.addLayer({id:"sendas-layer",type:"raster",source:"sendas",paint:{"raster-opacity":0.85}}); }
-    map.on("style.load", ()=>{ ensureHillshade(); ensureContours(); ensurePeaks(); ensureRouteLayer(); ensureTrackLayer(); ensureSendas(); applyTerrain(); updateCompass(); collapseAttrib(); });
+    map.on("style.load", ()=>{ ensureHillshade(); ensureContours(); ensurePeaks(); ensureRouteLayer(); ensureTrackLayer(); ensureSendas(); applyTerrain(false); updateCompass(); collapseAttrib(); });
 
     // ===== brújula (orientación del mapa) + reset norte =====
     function updateCompass(){ $("compassRose").style.transform=`rotate(${-map.getBearing()}deg)`; }
