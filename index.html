@@ -186,6 +186,7 @@
 
   <div class="layerpicker" id="actionsPanel">
     <div class="lp-title">Acciones</div>
+    <button class="lp overlay" id="aDiag">🔎 Analizar mi móvil</button>
     <button class="lp overlay" id="aPlan">🧭 Planificar ruta</button>
     <button class="lp overlay" id="aPin">📍 Soltar chincheta</button>
     <button class="lp overlay" id="aPoi">⭐ Puntos de interés</button>
@@ -224,6 +225,9 @@
     let errTimer=null;
     const showErr=m=>{ const e=$("err"); e.textContent=m; e.style.display="block"; clearTimeout(errTimer); errTimer=setTimeout(()=>{ e.style.display="none"; },2000); };
     window.addEventListener("error", ev=>{ const m=ev.message||String(ev.error); if(m.indexOf("Script error")>=0) return; showErr(m); });
+
+    // Service Worker: motor de mapas offline reales (cachea teselas vistas/descargadas).
+    if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
 
     // ===== Fuentes de mapa: TODO libre (OSM / Sentinel-2 ESA / OpenTopoMap) =====
     const OFM_FONTS="https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf";
@@ -454,32 +458,51 @@
         const b=$("sosSend"); b.textContent="✓ SOS difundido"; b.disabled=true; setTimeout(closeModal,1600); }; };
 
     // ----- Mensajes off-grid (LoRa mesh, doble salto) -----
-    $("aMesh").onclick=()=>{ closeActions(); openModal(`<div class="m-emoji">📡</div><h2>Mensajes off-grid</h2>
+    let loraDevice=null;
+    $("aMesh").onclick=()=>{ closeActions(); const btState=navigator.bluetooth?(loraDevice?`✓ Conectado a ${loraDevice.name||"módulo"}`:"Conectar módulo LoRa (Bluetooth)"):"Bluetooth no soportado aquí — app nativa";
+      openModal(`<div class="m-emoji">📡</div><h2>Mensajes off-grid</h2>
       <p class="m-sub">Sin cobertura, tu mensaje salta por la malla — <b>gratis, sin operador</b>:</p>
       <div class="m-path">📲 → 📡 → 🗼 → 🛰️ → 🌐</div>
+      <button class="m-ghost" id="loraBtn" ${navigator.bluetooth?"":"disabled"} style="margin-top:0;margin-bottom:10px">${btState}</button>
       <textarea id="meshTxt" maxlength="160" placeholder="Mensaje corto (máx. 160)…"></textarea>
       <button class="m-primary" id="meshSend">Enviar por la malla</button><div id="meshProg"></div>`);
+      $("loraBtn").onclick=async()=>{ if(!navigator.bluetooth) return; $("loraBtn").textContent="Buscando módulo…";
+        try{ loraDevice=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:["6ba1b218-15a8-461f-9fa8-5dcae273eafd"]}); // UUID Meshtastic
+          $("loraBtn").textContent=`✓ Conectado a ${loraDevice.name||"módulo LoRa"}`; }
+        catch(e){ $("loraBtn").textContent= e&&e.name==="NotFoundError"?"Conectar módulo LoRa (Bluetooth)":"No se pudo conectar — reintenta"; } };
       $("meshSend").onclick=()=>{ const t=($("meshTxt").value||"").trim(); if(!t){ $("meshTxt").focus(); return; }
         const steps=["📡 Emitido por LoRa…","🗼 Recibido por gateway…","🛰️ Relé por satélite (APRS)…","🌐 Entregado a internet ✓"];
         $("meshSend").disabled=true; const box=$("meshProg");
         box.innerHTML=`<div class="m-prog"><i></i></div><div id="meshStep" style="font-size:12px;margin-top:8px;text-align:center;color:var(--muted)"></div>`;
         const bar=box.querySelector("i"); let i=0; const tick=()=>{ if(i>=steps.length) return; bar.style.width=((i+1)/steps.length*100)+"%"; $("meshStep").textContent=steps[i]; i++; setTimeout(tick,650); }; tick(); }; };
 
-    // ----- Descargar esta zona (flujo R8; el motor PMTiles real es nativo) -----
-    function zoneEstimate(b,z){ const dLat=Math.abs(b.getNorth()-b.getSouth()), dLon=Math.abs(b.getEast()-b.getWest());
-      let tiles=0; for(let dz=0; dz<=3; dz++){ const f=Math.pow(2,z+dz)/360; tiles+=Math.max(1,Math.ceil(dLon*f))*Math.max(1,Math.ceil(dLat*f)); }
-      return { tiles, mb:Math.max(3,Math.round(tiles*0.06)) }; }
-    $("aDownload").onclick=()=>{ closeActions(); const b=map.getBounds(), z=Math.round(map.getZoom()), c=map.getCenter(), est=zoneEstimate(b,z);
+    // ----- Descargar esta zona: DESCARGA REAL de teselas a la caché del Service Worker -----
+    const lon2t=(lo,z)=>Math.floor((lo+180)/360*Math.pow(2,z));
+    const lat2t=(la,z)=>{ const r=la*Math.PI/180; return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*Math.pow(2,z)); };
+    function tilesIn(b,z){ const out=[],x0=lon2t(b.getWest(),z),x1=lon2t(b.getEast(),z),y0=lat2t(b.getNorth(),z),y1=lat2t(b.getSouth(),z);
+      for(let x=Math.min(x0,x1);x<=Math.max(x0,x1);x++) for(let y=Math.min(y0,y1);y<=Math.max(y0,y1);y++) out.push([z,x,y]); return out; }
+    async function zoneUrls(b,z0,flavor){ const tpls=["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"]; // DEM = relieve/curvas/3D
+      if(flavor==="satelite"){ tpls.push(SAT[0]); tpls.push(PNOA[0]); }
+      else { try{ const tj=await (await fetch(OMT_PLANET)).json(); if(tj.tiles&&tj.tiles[0]) tpls.push(tj.tiles[0]); }catch(e){} } // plantilla real del vector
+      const urls=new Set();
+      for(let z=z0; z<=z0+2; z++){ for(const [zz,x,y] of tilesIn(b,z)) for(const t of tpls) urls.add(t.replace("{z}",zz).replace("{x}",x).replace("{y}",y)); if(urls.size>800) break; }
+      return [...urls]; }
+    async function cachedMB(){ try{ const e=await navigator.storage.estimate(); return (e.usage/1e6).toFixed(0); }catch(_){ return "?"; } }
+    $("aDownload").onclick=async()=>{ closeActions(); const b=map.getBounds(), z=Math.round(map.getZoom()), c=map.getCenter();
+      const swOk="serviceWorker" in navigator && navigator.serviceWorker.controller;
+      const urls=await zoneUrls(b,z,currentFlavor);
       openModal(`<div class="m-emoji">⬇️</div><h2>Descargar esta zona</h2>
-        <p class="m-sub">Guarda el mapa visible para usarlo <b>sin cobertura</b>: vector + relieve + cumbres. Render local = instantáneo.</p>
-        <div class="m-coords">${c.lat.toFixed(3)}, ${c.lng.toFixed(3)} · zoom ${z}–${z+3}<br>≈ ${est.tiles.toLocaleString("es")} teselas · ~${est.mb} MB</div>
-        <button class="m-primary" id="dlGo">Descargar (~${est.mb} MB)</button><div id="dlProg"></div>`);
-      $("dlGo").onclick=()=>{ $("dlGo").disabled=true; const box=$("dlProg");
-        box.innerHTML=`<div class="m-prog"><i></i></div><div id="dlPct" style="font-size:12px;margin-top:8px;text-align:center;color:var(--muted)">Preparando…</div>`;
-        const bar=box.querySelector("i"); let p=0; const iv=setInterval(()=>{ p+=Math.random()*15+7;
-          if(p>=100){ clearInterval(iv); bar.style.width="100%"; $("dlPct").textContent="✓ Disponible sin conexión"; $("dlGo").textContent="✓ Zona descargada";
-            const zs=JSON.parse(localStorage.getItem("novara.zones")||"[]"); zs.push({when:Date.now(),lat:c.lat,lon:c.lng,z,mb:est.mb}); localStorage.setItem("novara.zones",JSON.stringify(zs)); }
-          else { bar.style.width=p+"%"; $("dlPct").textContent=Math.round(p)+"% · descargando teselas…"; } },260); }; };
+        <p class="m-sub">Descarga REAL: guarda las teselas (vector + relieve + ${currentFlavor==="satelite"?"satélite":"cumbres"}) en el móvil para usar el mapa <b>sin cobertura</b>.</p>
+        <div class="m-coords">${c.lat.toFixed(3)}, ${c.lng.toFixed(3)} · zoom ${z}–${z+2}<br>${urls.length.toLocaleString("es")} teselas a descargar</div>
+        ${swOk?"":'<p class="m-sub" style="color:#f0b24a">⚠️ Recarga la app una vez para activar el motor offline (Service Worker) y luego descarga.</p>'}
+        <button class="m-primary" id="dlGo">Descargar ${urls.length} teselas</button><div id="dlProg"></div>`);
+      $("dlGo").onclick=async()=>{ $("dlGo").disabled=true; const box=$("dlProg");
+        box.innerHTML=`<div class="m-prog"><i></i></div><div id="dlPct" style="font-size:12px;margin-top:8px;text-align:center;color:var(--muted)">Descargando…</div>`;
+        const bar=box.querySelector("i"); let done=0;
+        const batch=8; for(let i=0;i<urls.length;i+=batch){ await Promise.all(urls.slice(i,i+batch).map(u=>fetch(u,{mode:"no-cors"}).catch(()=>{}))); done=Math.min(i+batch,urls.length);
+          bar.style.width=(done/urls.length*100)+"%"; $("dlPct").textContent=Math.round(done/urls.length*100)+"% · "+done+"/"+urls.length+" teselas"; }
+        const mb=await cachedMB(); bar.style.width="100%"; $("dlPct").textContent=`✓ Zona disponible sin conexión · ${mb} MB en caché`; $("dlGo").textContent="✓ Zona descargada";
+        const zs=JSON.parse(localStorage.getItem("novara.zones")||"[]"); zs.push({when:Date.now(),lat:c.lat,lon:c.lng,z,tiles:urls.length}); localStorage.setItem("novara.zones",JSON.stringify(zs)); }; };
 
     // ----- Planificar ruta (multi-punto, OSRM) -----
     function planMarkerEl(n){ const el=document.createElement("div"); el.textContent=n;
@@ -532,6 +555,52 @@
         out.innerHTML=`<div class="m-list">${items.map((p,i)=>`<div class="pr" data-i="${i}"><b>${p.name}</b>${userLoc?` <span class="d">· a ${fmtDist(haversine(userLoc,{lon:p.lon,lat:p.lat}))}</span>`:""}</div>`).join("")}</div>`;
         out.querySelectorAll(".pr").forEach(r=>r.onclick=()=>{ const p=items[+r.dataset.i]; closeModal(); map.flyTo({center:[p.lon,p.lat],zoom:15}); dropPin(p.lon,p.lat); showPlace({name:p.name,sub:POI_CATS[cat].label,lon:p.lon,lat:p.lat,cat:""}); });
       }catch(e){ out.innerHTML='<div style="color:var(--muted);font-size:13px">Overpass no responde ahora, reintenta.</div>'; } }
+
+    // ----- Análisis del dispositivo: la app comprueba qué puede hacer ESTE móvil -----
+    async function runDiag(){ const c=[]; const add=(emoji,name,status,note)=>c.push({emoji,name,status,note}); // status: ok|maybe|no
+      // GPS (intento real de fix)
+      let g={s:"no",n:"No disponible en este dispositivo"};
+      if(navigator.geolocation){ g={s:"maybe",n:"Disponible — falta conceder permiso"};
+        try{ const p=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{timeout:6000,enableHighAccuracy:true}));
+          userLoc={lon:p.coords.longitude,lat:p.coords.latitude}; g={s:"ok",n:`Activo · precisión ±${Math.round(p.coords.accuracy)} m`};
+        }catch(e){ g=e&&e.code===1?{s:"no",n:"Permiso denegado — actívalo en el candado"}:{s:"maybe",n:"Sin señal GPS aún (prueba al aire libre)"}; } }
+      add("📍","Ubicación GPS",g.s,g.n);
+      add("🛰️","Galileo / multi-GNSS","maybe","Posición sí; leer la constelación Galileo = solo app nativa (apk)");
+      // Brújula (intento real de leer rumbo)
+      let cp={s:"no",n:"Sensor no detectado"};
+      if(window.DeviceOrientationEvent){ cp={s:"maybe",n:"Sensor presente — falta permiso"};
+        const ok=await new Promise(res=>{ let d=false; const h=e=>{ const hd=e.webkitCompassHeading!=null?e.webkitCompassHeading:(e.absolute&&e.alpha!=null?360-e.alpha:null); if(hd!=null&&!d){ d=true; window.removeEventListener("deviceorientation",h); res(true);} };
+          window.addEventListener("deviceorientation",h,true); setTimeout(()=>{ if(!d){ window.removeEventListener("deviceorientation",h); res(false);} },1400); });
+        cp= ok?{s:"ok",n:"Rumbo en vivo (la flecha apunta a donde miras)"}:(typeof DeviceOrientationEvent.requestPermission==="function"?{s:"maybe",n:"Toca la brújula para conceder (iOS)"}:{s:"maybe",n:"Presente; aún sin lecturas"}); }
+      add("🧭","Brújula / rumbo",cp.s,cp.n);
+      add("📐","Acelerómetro / giro", window.DeviceMotionEvent?"ok":"no", window.DeviceMotionEvent?"Presente (inclinación, pasos)":"No disponible");
+      // Mapas offline (Service Worker + caché + espacio)
+      let off={s:"no",n:"Este navegador no soporta offline"};
+      if("serviceWorker" in navigator && "caches" in window){ const ctrl=!!navigator.serviceWorker.controller; off={s:ctrl?"ok":"maybe",n:ctrl?"Motor offline ACTIVO":"Activo tras recargar una vez"};
+        try{ const e=await navigator.storage.estimate(); off.n+=` · ${(e.usage/1e6).toFixed(0)} MB en caché · ~${((e.quota-e.usage)/1e9).toFixed(1)} GB libres`; }catch(_){} }
+      add("⬇️","Mapas offline",off.s,off.n);
+      // Bluetooth → módulo LoRa
+      let bt={s:"no",n:"No soportado en este navegador (usa la app nativa)"};
+      if(navigator.bluetooth){ bt={s:"ok",n:"Puedes emparejar un módulo LoRa/Meshtastic por Bluetooth"};
+        try{ const av=await navigator.bluetooth.getAvailability(); if(!av) bt={s:"maybe",n:"API presente; enciende el Bluetooth"}; }catch(_){} }
+      add("📡","Bluetooth (módulo LoRa)",bt.s,bt.n);
+      add("🆘","Compartir / SOS", navigator.share?"ok":"maybe", navigator.share?"Compartir nativo (difundir posición)":"Copia al portapapeles");
+      add("☎️","Llamada de emergencia 112","ok","Disponible");
+      add("📳","Vibración / alertas", navigator.vibrate?"ok":"no", navigator.vibrate?"Disponible":"No disponible");
+      add("🔆","Pantalla activa en ruta", ("wakeLock" in navigator)?"ok":"maybe", ("wakeLock" in navigator)?"Mantiene la pantalla encendida":"Limitado en este navegador");
+      const cn=navigator.connection; add("🌐","Conexión", navigator.onLine?"ok":"maybe", navigator.onLine?("En línea"+(cn&&cn.effectiveType?" · "+cn.effectiveType:"")):"Sin conexión (modo offline)");
+      add("🛰️","SOS satélite del móvil","maybe","Depende del modelo/OS — lo gestiona el sistema (iPhone 14+, Pixel 9+…)");
+      return c; }
+    $("aDiag").onclick=async()=>{ closeActions(); requestOrient();
+      openModal(`<div class="m-emoji">🔎</div><h2>Análisis de tu móvil</h2>
+        <p class="m-sub">NOVARA comprueba qué puede hacer ESTE dispositivo. <span style="color:#3ad07a">●</span> listo · <span style="color:#f0b24a">●</span> con permiso/condición · <span style="color:#e23b34">●</span> no disponible.</p>
+        <div id="diagOut"><div style="text-align:center;color:var(--muted);font-size:13px;padding:24px">Analizando hardware… (concede permisos si los pide)</div></div>`);
+      const checks=await runDiag(); const dot={ok:"#3ad07a",maybe:"#f0b24a",no:"#e23b34"}, okN=checks.filter(c=>c.status==="ok").length;
+      $("diagOut").innerHTML=`<div style="text-align:center;font-weight:800;font-size:16px;margin-bottom:4px">${okN} de ${checks.length} funciones listas</div>
+        <div class="m-sub" style="margin-bottom:12px">en este móvil, ahora mismo</div>
+        <div class="m-list">${checks.map(c=>`<div class="pr" style="display:flex;align-items:center;gap:11px;cursor:default">
+          <span style="width:11px;height:11px;border-radius:50%;background:${dot[c.status]};flex:none;box-shadow:0 0 8px ${dot[c.status]}66"></span>
+          <span style="flex:1"><b>${c.emoji} ${c.name}</b><br><span class="d">${c.note}</span></span></div>`).join("")}</div>`; };
 
     // onboarding fricción-cero (una vez): explica y activa el GPS de un toque
     if(!localStorage.getItem("novara.onboarded")) setTimeout(()=>$("onboard").classList.add("show"),900);
