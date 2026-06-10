@@ -46,10 +46,16 @@
 
     .recpill{ position:fixed; top:74px; left:50%; transform:translateX(-50%); z-index:8; background:rgba(255,106,44,.94); color:#1a0d06; font-weight:800; font-size:13px; padding:9px 16px; border-radius:20px; box-shadow:0 4px 16px rgba(0,0,0,.4); }
 
-    .layers{ position:fixed; left:14px; bottom:120px; z-index:5; display:flex; gap:8px; flex-wrap:wrap; max-width:64%; }
-    .chip{ padding:8px 13px; border-radius:11px; cursor:pointer; font-size:13px; font-weight:600; background:var(--panel); backdrop-filter:blur(12px); border:1px solid var(--hair); color:var(--muted); }
-    .chip.on{ color:var(--cool); border-color:rgba(52,224,196,.5); background:rgba(52,224,196,.14); }
-    .chip.overlay.on{ color:var(--warm); border-color:rgba(255,106,44,.55); background:rgba(255,106,44,.16); }
+    /* selector de capas (un botón → panel), en vez de 5 chips sueltos */
+    .layerpicker{ position:fixed; right:14px; bottom:300px; z-index:6; width:230px; display:none;
+      background:var(--panel); backdrop-filter:blur(14px); border:1px solid var(--hair); border-radius:16px; padding:12px; box-shadow:0 8px 24px rgba(0,0,0,.5); }
+    .layerpicker.open{ display:block; }
+    .lp-title{ color:var(--muted); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; margin:2px 2px 8px; }
+    .lp-types{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+    .lp{ padding:11px 8px; border-radius:11px; border:1px solid var(--hair); background:rgba(255,255,255,.05); color:var(--ink); font-size:13px; font-weight:600; cursor:pointer; text-align:center; width:100%; }
+    .lp.on{ color:var(--cool); border-color:rgba(52,224,196,.55); background:rgba(52,224,196,.16); }
+    .lp.overlay{ text-align:left; }
+    .lp.overlay.on{ color:var(--warm); border-color:rgba(255,106,44,.55); background:rgba(255,106,44,.16); }
 
     .fabs{ position:fixed; right:14px; bottom:120px; z-index:5; display:flex; flex-direction:column; gap:12px; }
     .fab{ width:52px; height:52px; border-radius:50%; border:1px solid var(--hair); background:rgba(18,23,20,.9); backdrop-filter:blur(12px); color:var(--ink); font-size:22px; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 6px 18px rgba(0,0,0,.4); }
@@ -98,15 +104,20 @@
 
   <div class="recpill" id="recPill" style="display:none"></div>
 
-  <div class="layers">
-    <div class="chip on" data-flavor="topo">Topo</div>
-    <div class="chip" data-flavor="mapa">Mapa</div>
-    <div class="chip" data-flavor="noche">Noche</div>
-    <div class="chip" data-flavor="satelite">Satélite</div>
-    <div class="chip overlay" id="sendasChip">Sendas</div>
+  <div class="layerpicker" id="layerPicker">
+    <div class="lp-title">Tipo de mapa</div>
+    <div class="lp-types">
+      <button class="lp on" data-flavor="aventura">Aventura</button>
+      <button class="lp" data-flavor="mapa">Mapa</button>
+      <button class="lp" data-flavor="satelite">Satélite</button>
+      <button class="lp" data-flavor="noche">Noche</button>
+    </div>
+    <div class="lp-title">Capas</div>
+    <button class="lp overlay" id="sendasChip">🥾 Sendas (rutas de montaña)</button>
   </div>
 
   <div class="fabs">
+    <div class="fab" id="layersBtn" title="Capas">▦</div>
     <div class="fab" id="locBtn" title="Mi ubicación">◎</div>
     <div class="fab accent" id="trackBtn" title="Grabar track">▶</div>
   </div>
@@ -132,29 +143,29 @@
 
     // ===== Fuentes de mapa: TODO libre (OSM / Sentinel-2 ESA / OpenTopoMap) =====
     const OFM_FONTS="https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf";
-    const TOPO=["https://a.tile.opentopomap.org/{z}/{x}/{y}.png","https://b.tile.opentopomap.org/{z}/{x}/{y}.png","https://c.tile.opentopomap.org/{z}/{x}/{y}.png"];
     const SAT=["https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg"];
     const SENDAS=["https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png"];
     const rasterStyle=(tiles,attr,maxz)=>({ version:8, glyphs:OFM_FONTS,
       sources:{ r:{ type:"raster", tiles, tileSize:256, attribution:attr, maxzoom:maxz||18 } },
       layers:[{ id:"bg",type:"background",paint:{"background-color":"#0c100e"} },{ id:"r",type:"raster",source:"r" }] });
-    const STYLES={ mapa:"https://tiles.openfreemap.org/styles/bright", noche:"https://tiles.openfreemap.org/styles/dark" };
+    // Aventura = OpenFreeMap "liberty" (vector, con relieve, rápido). OpenTopoMap (raster lento/feo) RETIRADO.
+    const STYLES={ aventura:"https://tiles.openfreemap.org/styles/liberty", mapa:"https://tiles.openfreemap.org/styles/bright", noche:"https://tiles.openfreemap.org/styles/dark" };
     function buildStyle(f){
-      if(f==="topo") return rasterStyle(TOPO,"© OpenTopoMap (CC-BY-SA) · © OpenStreetMap",17);
       if(f==="satelite") return rasterStyle(SAT,"Sentinel-2 cloudless · EOX (CC-BY) · Copernicus/ESA",18);
-      return STYLES[f]||STYLES.mapa;
+      return STYLES[f]||STYLES.aventura;
     }
 
-    const map=new maplibregl.Map({ container:"map", style:buildStyle("topo"), center:[-3.70,40.42], zoom:5.4, attributionControl:{compact:true} });
+    const map=new maplibregl.Map({ container:"map", style:buildStyle("aventura"), center:[-3.70,40.42], zoom:5.4, attributionControl:{compact:true} });
     map.on("error", e=>showErr("mapa: "+(e.error&&e.error.message)));
 
     let userLoc=null, dest=null, routeGeoJSON=null, trackGeoJSON=null, pin=null, userMarker=null, steps=[], heading=null;
     const saved=JSON.parse(localStorage.getItem("novara.saved")||"[]"); const savedMarkers=[];
-    let currentFlavor="topo", sendasOn=false;
+    let currentFlavor="aventura", sendasOn=false;
 
-    document.querySelectorAll(".chip[data-flavor]").forEach(ch=>ch.addEventListener("click",()=>{
-      document.querySelectorAll(".chip[data-flavor]").forEach(x=>x.classList.remove("on"));
-      ch.classList.add("on"); currentFlavor=ch.dataset.flavor; map.setStyle(buildStyle(currentFlavor)); }));
+    $("layersBtn").onclick=()=>$("layerPicker").classList.toggle("open");
+    document.querySelectorAll(".lp[data-flavor]").forEach(b=>b.addEventListener("click",()=>{
+      document.querySelectorAll(".lp[data-flavor]").forEach(x=>x.classList.remove("on"));
+      b.classList.add("on"); currentFlavor=b.dataset.flavor; map.setStyle(buildStyle(currentFlavor)); $("layerPicker").classList.remove("open"); }));
     $("sendasChip").onclick=()=>{ sendasOn=!sendasOn; $("sendasChip").classList.toggle("on",sendasOn);
       if(sendasOn) ensureSendas(); else { if(map.getLayer("sendas-layer")) map.removeLayer("sendas-layer"); if(map.getSource("sendas")) map.removeSource("sendas"); } };
 
