@@ -118,6 +118,8 @@
     .m-primary:disabled{ opacity:.7; }
     .m-ghost{ width:100%; padding:12px; border-radius:14px; border:1px solid var(--hair); background:transparent; color:var(--ink); font-size:14px; font-weight:700; cursor:pointer; margin-top:10px; }
     .modal-card textarea{ width:100%; height:84px; resize:none; background:rgba(255,255,255,.05); border:1px solid var(--hair); border-radius:12px; color:var(--ink); font-size:14px; padding:11px; font-family:inherit; margin-bottom:10px; }
+    .m-input{ width:100%; background:rgba(255,255,255,.05); border:1px solid var(--hair); border-radius:12px; color:var(--ink); font-size:14px; padding:12px; font-family:inherit; margin-bottom:10px; outline:none; }
+    .m-input:focus{ border-color:rgba(52,224,196,.55); }
     .m-path{ text-align:center; font-size:17px; letter-spacing:.04em; color:var(--muted); margin:2px 0 14px; }
     .m-prog{ height:10px; border-radius:6px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:14px; }
     .m-prog>i{ display:block; height:100%; width:0; background:var(--cool); transition:width .25s; }
@@ -328,15 +330,23 @@
     $("compass").onclick=()=>{ map.easeTo({bearing:0,pitch:0}); requestOrient(); };
 
     // ===== orientación del dispositivo (flecha "hacia dónde miramos") =====
-    function onOrient(e){ let h=null;
+    // La app nativa (apk) empuja el rumbo del sensor de rotación REAL del móvil → window.__novaraHeading.
+    // Es mucho más preciso que el deviceorientation del navegador, así que cuando llega, manda él.
+    let headingFromNative=false;
+    window.__novaraHeading=function(deg){ if(typeof deg!=="number"||isNaN(deg)) return; headingFromNative=true; heading=(deg%360+360)%360; updateUserHeading(); };
+    function onOrient(e){ if(headingFromNative) return; let h=null;
       if(e.webkitCompassHeading!=null) h=e.webkitCompassHeading;
       else if(e.absolute && e.alpha!=null) h=360-e.alpha;
-      if(h==null) return; heading=h; updateUserHeading(); }
+      if(h==null) return; heading=(h%360+360)%360; updateUserHeading(); }
     window.addEventListener("deviceorientationabsolute", onOrient, true);
     window.addEventListener("deviceorientation", onOrient, true);
     function requestOrient(){ try{ if(typeof DeviceOrientationEvent!=="undefined" && DeviceOrientationEvent.requestPermission)
       DeviceOrientationEvent.requestPermission().then(s=>{ if(s==="granted") window.addEventListener("deviceorientation",onOrient,true); }).catch(()=>{}); }catch(e){} }
-    function updateUserHeading(){ if(!userMarker||heading==null) return; const h=userMarker.getElement().querySelector(".uh"); if(h) h.style.transform=`translate(-50%,-50%) rotate(${heading}deg)`; }
+    // La flecha se dibuja sobre un marcador que NO gira con el mapa; para que apunte al rumbo
+    // geográfico correcto hay que restarle el giro del mapa (bearing).
+    function updateUserHeading(){ if(!userMarker||heading==null) return; const h=userMarker.getElement().querySelector(".uh");
+      if(h) h.style.transform=`translate(-50%,-50%) rotate(${heading-map.getBearing()}deg)`; }
+    map.on("rotate", updateUserHeading);
 
     function dropPin(lon,lat){ if(pin) pin.remove(); const el=document.createElement("div");
       el.style.cssText="width:18px;height:18px;border-radius:50%;background:#ff6a2c;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5)";
@@ -457,28 +467,44 @@
         if(NATIVE&&NATIVE.share){ try{ NATIVE.share(txt); }catch(_){} } else if(navigator.share) navigator.share({title:"SOS NOVARA",text:txt}).catch(()=>{}); else if(navigator.clipboard) navigator.clipboard.writeText(txt);
         const b=$("sosSend"); b.textContent="✓ SOS difundido"; b.disabled=true; setTimeout(closeModal,1600); }; };
 
-    // ----- Mensajes off-grid (LoRa mesh, doble salto) -----
+    // ----- Mensaje a un contacto (off-grid por LoRa cuando no hay cobertura) -----
+    // Abre una URL externa (WhatsApp/SMS/email). En la app nativa via puente; en navegador, window.open.
+    function openExternal(url){ if(NATIVE&&NATIVE.openExternal){ try{ NATIVE.openExternal(url); return true; }catch(_){} return false; }
+      try{ window.open(url,"_blank"); return true; }catch(_){ return false; } }
+    // Entrega REAL al destinatario que elija el usuario.
+    function deliverMessage(to,msg){ const raw=(to||"").trim();
+      const digits=raw.replace(/[^\d+]/g,""); const isPhone=/^\+?\d{6,15}$/.test(digits); const isEmail=/^\S+@\S+\.\S+$/.test(raw);
+      if(isPhone){ const num=digits.replace(/^\+/,""); const ext=openExternal(`https://wa.me/${num}?text=${encodeURIComponent(msg)}`);
+        if(ext) return {ok:true,how:`WhatsApp a ${raw}`}; // si no se pudo abrir, cae a SMS
+        if(openExternal(`sms:${digits}?body=${encodeURIComponent(msg)}`)) return {ok:true,how:`SMS a ${raw}`}; }
+      if(isEmail){ if(openExternal(`mailto:${encodeURIComponent(raw)}?subject=${encodeURIComponent("Mensaje NOVARA")}&body=${encodeURIComponent(msg)}`)) return {ok:true,how:`email a ${raw}`}; }
+      // contacto por nombre / sin formato claro → hoja de compartir nativa (eliges app y contacto)
+      const text=(raw?("Para "+raw+": "):"")+msg;
+      if(NATIVE&&NATIVE.share){ try{ NATIVE.share(text); return {ok:true,how:"elige el contacto"}; }catch(_){} }
+      if(navigator.share){ navigator.share({text}).catch(()=>{}); return {ok:true,how:"elige el contacto"}; }
+      if(navigator.clipboard){ navigator.clipboard.writeText(text); return {ok:true,how:"copiado al portapapeles"}; }
+      return {ok:false}; }
     let loraDevice=null;
     $("aMesh").onclick=()=>{ closeActions();
       const nativeBT = NATIVE && (()=>{ try{ return NATIVE.bluetoothSupported(); }catch(_){ return false; } })();
       const btState = navigator.bluetooth ? (loraDevice?`✓ Conectado a ${loraDevice.name||"módulo"}`:"Conectar módulo LoRa (Bluetooth)")
-        : nativeBT ? "Bluetooth LE listo · empareja el módulo en Ajustes" : "Bluetooth no soportado aquí — app nativa";
+        : nativeBT ? "Bluetooth LE del móvil listo (para el módulo LoRa)" : "Bluetooth no soportado aquí";
       const btDisabled = navigator.bluetooth ? "" : "disabled";
-      openModal(`<div class="m-emoji">📡</div><h2>Mensajes off-grid</h2>
-      <p class="m-sub">Sin cobertura, tu mensaje salta por la malla — <b>gratis, sin operador</b>:</p>
-      <div class="m-path">📲 → 📡 → 🗼 → 🛰️ → 🌐</div>
-      <button class="m-ghost" id="loraBtn" ${btDisabled} style="margin-top:0;margin-bottom:10px">${btState}</button>
-      <textarea id="meshTxt" maxlength="160" placeholder="Mensaje corto (máx. 160)…"></textarea>
-      <button class="m-primary" id="meshSend">Enviar por la malla</button><div id="meshProg"></div>`);
+      openModal(`<div class="m-emoji">📨</div><h2>Mensaje a un contacto</h2>
+      <p class="m-sub"><b>Con cobertura le llega ya</b> por WhatsApp/SMS/email que elijas. <b>Sin cobertura</b>, con el módulo LoRa saltará por la malla hasta ese mismo contacto.</p>
+      <input id="meshTo" class="m-input" placeholder="Para: teléfono (+34…), email o nombre" autocomplete="off" />
+      <textarea id="meshTxt" maxlength="300" placeholder="Tu mensaje…"></textarea>
+      <button class="m-primary" id="meshSend">Enviar mensaje</button>
+      <button class="m-ghost" id="loraBtn" ${btDisabled}>${btState}</button>
+      <div class="m-path" style="margin-top:14px;font-size:14px">off-grid: 📲 → 📡 LoRa → 🗼 → 🛰️ → 📲 contacto</div>
+      <div id="meshProg"></div>`);
       $("loraBtn").onclick=async()=>{ if(!navigator.bluetooth) return; $("loraBtn").textContent="Buscando módulo…";
         try{ loraDevice=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:["6ba1b218-15a8-461f-9fa8-5dcae273eafd"]}); // UUID Meshtastic
           $("loraBtn").textContent=`✓ Conectado a ${loraDevice.name||"módulo LoRa"}`; }
         catch(e){ $("loraBtn").textContent= e&&e.name==="NotFoundError"?"Conectar módulo LoRa (Bluetooth)":"No se pudo conectar — reintenta"; } };
-      $("meshSend").onclick=()=>{ const t=($("meshTxt").value||"").trim(); if(!t){ $("meshTxt").focus(); return; }
-        const steps=["📡 Emitido por LoRa…","🗼 Recibido por gateway…","🛰️ Relé por satélite (APRS)…","🌐 Entregado a internet ✓"];
-        $("meshSend").disabled=true; const box=$("meshProg");
-        box.innerHTML=`<div class="m-prog"><i></i></div><div id="meshStep" style="font-size:12px;margin-top:8px;text-align:center;color:var(--muted)"></div>`;
-        const bar=box.querySelector("i"); let i=0; const tick=()=>{ if(i>=steps.length) return; bar.style.width=((i+1)/steps.length*100)+"%"; $("meshStep").textContent=steps[i]; i++; setTimeout(tick,650); }; tick(); }; };
+      $("meshSend").onclick=()=>{ const to=($("meshTo").value||"").trim(); const t=($("meshTxt").value||"").trim();
+        if(!t){ $("meshTxt").focus(); return; } const r=deliverMessage(to,t); const box=$("meshProg");
+        box.innerHTML=`<div style="text-align:center;font-size:13px;margin-top:12px;color:${r.ok?"var(--cool)":"#f0b24a"}">${r.ok?("✓ Enviando — "+r.how):"Escribe a quién: teléfono, email o nombre"}</div>`; }; };
 
     // ----- Descargar esta zona: DESCARGA REAL de teselas a la caché del Service Worker -----
     const lon2t=(lo,z)=>Math.floor((lo+180)/360*Math.pow(2,z));
