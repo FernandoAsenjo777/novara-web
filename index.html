@@ -87,10 +87,28 @@
     .maplibregl-ctrl-attrib{ background:rgba(12,16,14,.45) !important; border-radius:11px !important; font-size:10px; }
     .maplibregl-ctrl-attrib a, .maplibregl-ctrl-attrib{ color:#7d8a83 !important; }
     .maplibregl-ctrl-attrib-button{ background-color:rgba(12,16,14,.55) !important; }
+
+    /* onboarding fricción-cero: activar ubicación de un toque */
+    .onboard{ position:fixed; inset:0; z-index:20; background:rgba(0,0,0,.55); backdrop-filter:blur(4px); display:none; align-items:flex-end; }
+    .onboard.show{ display:flex; }
+    .ob-card{ background:var(--bg); border-top-left-radius:22px; border-top-right-radius:22px; border-top:1px solid var(--hair); padding:26px 22px 30px; width:100%; text-align:center; box-shadow:0 -10px 40px rgba(0,0,0,.6); }
+    .ob-emoji{ font-size:40px; } .ob-card h3{ margin:10px 0 6px; font-size:21px; } .ob-card p{ color:var(--muted); font-size:14px; line-height:1.5; margin:0 0 12px; }
+    .ob-card button{ width:100%; padding:14px; border-radius:14px; border:0; font-size:15px; font-weight:800; cursor:pointer; margin-top:10px; background:var(--cool); color:#06201b; }
+    .ob-card button.ghost{ background:transparent; color:var(--muted); font-weight:600; }
   </style>
 </head>
 <body>
   <div id="map"></div>
+
+  <div class="onboard" id="onboard">
+    <div class="ob-card">
+      <div class="ob-emoji">🧭</div>
+      <h3>NOVARA necesita tu ubicación</h3>
+      <p>Para tu posición, el rumbo y calcular rutas <b>desde ti</b>. Sin cuenta, sin rastreo, gratis.</p>
+      <button id="obAllow">Permitir ubicación</button>
+      <button class="ghost" id="obSkip">Ahora no</button>
+    </div>
+  </div>
 
   <div class="search" id="searchBar">
     <div class="box"><span class="logo">NOVARA</span>
@@ -121,6 +139,7 @@
     </div>
     <div class="lp-title">Relieve</div>
     <button class="lp overlay on" id="curvasChip">⛰️ Curvas de nivel</button>
+    <button class="lp overlay on" id="peaksChip">🗻 Cumbres (nombre + altitud)</button>
     <button class="lp overlay" id="d3Chip">🏔️ Relieve 3D</button>
     <div class="lp-title">Capas</div>
     <button class="lp overlay" id="sendasChip">🥾 Sendas (rutas)</button>
@@ -175,7 +194,7 @@
     // ===== Relieve desde DEM gratis (terrarium): curvas de nivel + hillshade + 3D =====
     const demSource=new mlcontour.DemSource({ url:"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png", encoding:"terrarium", maxzoom:13, worker:true });
     demSource.setupMaplibre(maplibregl);
-    let showContours=true, is3D=false;
+    let showContours=true, is3D=false, showPeaks=true;
     function ensureDem(){ if(!map.getSource("dem")) map.addSource("dem",{ type:"raster-dem", encoding:"terrarium", tiles:[demSource.sharedDemProtocolUrl], maxzoom:13, tileSize:256 }); }
     function firstSymbol(){ const s=map.getStyle().layers.find(l=>l.type==="symbol"); return s?s.id:undefined; }
     function ensureHillshade(){ if(currentFlavor==="satelite") return; ensureDem(); if(!map.getLayer("hillshade")) map.addLayer({ id:"hillshade", type:"hillshade", source:"dem", paint:{ "hillshade-exaggeration":0.35 } }, firstSymbol()); }
@@ -185,6 +204,14 @@
       if(!map.getLayer("contour-lines")) map.addLayer({ id:"contour-lines", type:"line", source:"contours", "source-layer":"contours", paint:{ "line-color":"rgba(150,110,70,.55)", "line-width":["match",["get","level"],1,1.4,0.6] } }, before);
       if(!map.getLayer("contour-labels")) map.addLayer({ id:"contour-labels", type:"symbol", source:"contours", "source-layer":"contours", filter:[">",["get","level"],0], layout:{ "symbol-placement":"line", "text-field":["concat",["to-string",["get","ele"]]," m"], "text-font":["Noto Sans Regular"], "text-size":10, "text-max-angle":25 }, paint:{ "text-color":"#c79a64", "text-halo-color":"#0c100e", "text-halo-width":1 } }); }
     function applyTerrain(){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.5 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky(null); }catch(e){} map.easeTo({ pitch:0 }); } }
+    // Cumbres: nombre + altitud de los picos (datos OSM, gratis) — lo que PeakVisor cobra
+    function ensurePeaks(){ if(!showPeaks){ if(map.getLayer("peaks")) map.removeLayer("peaks"); return; }
+      if(!map.getSource("peaksrc")) map.addSource("peaksrc",{ type:"vector", url:"https://tiles.openfreemap.org/planet" });
+      if(!map.getLayer("peaks")) map.addLayer({ id:"peaks", type:"symbol", source:"peaksrc", "source-layer":"mountain_peak", minzoom:7,
+        layout:{ "text-field":["concat","▲ ",["coalesce",["get","name"],""],["case",["has","ele"],["concat","  ",["to-string",["round",["to-number",["get","ele"]]]],"m"],""]],
+          "text-font":["Noto Sans Regular"], "text-size":11, "text-anchor":"top", "text-offset":[0,0.2], "text-max-width":9,
+          "symbol-sort-key":["case",["has","rank"],["to-number",["get","rank"]],99] },
+        paint:{ "text-color":"#f0c074", "text-halo-color":"#0c100e", "text-halo-width":1.5 } }); }
 
     let userLoc=null, dest=null, routeGeoJSON=null, trackGeoJSON=null, pin=null, userMarker=null, steps=[], heading=null;
     const saved=JSON.parse(localStorage.getItem("novara.saved")||"[]"); const savedMarkers=[];
@@ -195,6 +222,7 @@
       document.querySelectorAll(".lp[data-flavor]").forEach(x=>x.classList.remove("on"));
       b.classList.add("on"); currentFlavor=b.dataset.flavor; map.setStyle(buildStyle(currentFlavor)); $("layerPicker").classList.remove("open"); }));
     $("curvasChip").onclick=()=>{ showContours=!showContours; $("curvasChip").classList.toggle("on",showContours); ensureContours(); };
+    $("peaksChip").onclick=()=>{ showPeaks=!showPeaks; $("peaksChip").classList.toggle("on",showPeaks); ensurePeaks(); };
     $("d3Chip").onclick=()=>{ is3D=!is3D; $("d3Chip").classList.toggle("on",is3D); applyTerrain(); };
     $("sendasChip").onclick=()=>{ sendasOn=!sendasOn; $("sendasChip").classList.toggle("on",sendasOn);
       if(sendasOn) ensureSendas(); else { if(map.getLayer("sendas-layer")) map.removeLayer("sendas-layer"); if(map.getSource("sendas")) map.removeSource("sendas"); } };
@@ -208,7 +236,7 @@
     function ensureSendas(){ if(!sendasOn) return;
       if(!map.getSource("sendas")) map.addSource("sendas",{type:"raster",tiles:SENDAS,tileSize:256,attribution:"© Waymarked Trails (CC-BY-SA)"});
       if(!map.getLayer("sendas-layer")) map.addLayer({id:"sendas-layer",type:"raster",source:"sendas",paint:{"raster-opacity":0.85}}); }
-    map.on("style.load", ()=>{ ensureHillshade(); ensureContours(); ensureRouteLayer(); ensureTrackLayer(); ensureSendas(); applyTerrain(); updateCompass(); collapseAttrib(); });
+    map.on("style.load", ()=>{ ensureHillshade(); ensureContours(); ensurePeaks(); ensureRouteLayer(); ensureTrackLayer(); ensureSendas(); applyTerrain(); updateCompass(); collapseAttrib(); });
 
     // ===== brújula (orientación del mapa) + reset norte =====
     function updateCompass(){ $("compassRose").style.transform=`rotate(${-map.getBearing()}deg)`; }
@@ -316,6 +344,11 @@
     function trackBack(){ if(!lastTrack||lastTrack.length<2) return; routeGeoJSON={type:"Feature",geometry:{type:"LineString",coordinates:lastTrack.slice().reverse()}}; ensureRouteLayer();
       const cs=routeGeoJSON.geometry.coordinates,b=new maplibregl.LngLatBounds(cs[0],cs[0]); cs.forEach(c=>b.extend(c)); map.fitBounds(b,{padding:70}); $("sheetTitle").textContent="↩ TrackBack activo"; $("sheetSub").textContent="Sigue la línea para volver por donde viniste"; }
     $("trackBtn").onclick=toggleRecord;
+
+    // onboarding fricción-cero (una vez): explica y activa el GPS de un toque
+    if(!localStorage.getItem("novara.onboarded")) setTimeout(()=>$("onboard").classList.add("show"),900);
+    $("obAllow").onclick=()=>{ localStorage.setItem("novara.onboarded","1"); $("onboard").classList.remove("show"); requestOrient(); $("locBtn").click(); };
+    $("obSkip").onclick=()=>{ localStorage.setItem("novara.onboarded","1"); $("onboard").classList.remove("show"); };
   </script>
 </body>
 </html>
