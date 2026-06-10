@@ -168,21 +168,25 @@
     const $=id=>document.getElementById(id);
     let errTimer=null;
     const showErr=m=>{ const e=$("err"); e.textContent=m; e.style.display="block"; clearTimeout(errTimer); errTimer=setTimeout(()=>{ e.style.display="none"; },2000); };
-    window.addEventListener("error", ev=>showErr(ev.message||String(ev.error)));
+    window.addEventListener("error", ev=>{ const m=ev.message||String(ev.error); if(m.indexOf("Script error")>=0) return; showErr(m); });
 
     // ===== Fuentes de mapa: TODO libre (OSM / Sentinel-2 ESA / OpenTopoMap) =====
     const OFM_FONTS="https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf";
     const SAT=["https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg"];
+    // Ortofoto alta resolución de España (IGN PNOA, gratis, ~0,5 m) — encima del Sentinel-2 mundial.
+    const PNOA=["https://www.ign.es/wmts/pnoa-ma?Service=WMTS&Request=GetTile&Version=1.0.0&Layer=OI.OrthoimageCoverage&Style=default&Format=image/jpeg&TileMatrixSet=GoogleMapsCompatible&TileMatrix={z}&TileCol={x}&TileRow={y}"];
     const SENDAS=["https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png"];
-    const rasterStyle=(tiles,attr,maxz)=>({ version:8, glyphs:OFM_FONTS,
-      sources:{ r:{ type:"raster", tiles, tileSize:256, attribution:attr, maxzoom:maxz||18 } },
-      layers:[{ id:"bg",type:"background",paint:{"background-color":"#0c100e"} },{ id:"r",type:"raster",source:"r" }] });
     // Aventura = OpenFreeMap "liberty" (vector, con relieve, rápido). OpenTopoMap (raster lento/feo) RETIRADO.
     const STYLES={ aventura:"https://tiles.openfreemap.org/styles/liberty", mapa:"https://tiles.openfreemap.org/styles/bright", noche:"https://tiles.openfreemap.org/styles/dark" };
-    function buildStyle(f){
-      if(f==="satelite") return rasterStyle(SAT,"Sentinel-2 cloudless · EOX (CC-BY) · Copernicus/ESA",18);
-      return STYLES[f]||STYLES.aventura;
-    }
+    function satelliteStyle(){ return { version:8, glyphs:OFM_FONTS,
+      sources:{ sat:{ type:"raster", tiles:SAT, tileSize:256, attribution:"Sentinel-2 cloudless · EOX (CC-BY) · ESA" },
+        pnoa:{ type:"raster", tiles:PNOA, tileSize:256, attribution:"PNOA © Instituto Geográfico Nacional de España" },
+        omt:{ type:"vector", url:"https://tiles.openfreemap.org/planet" } },
+      layers:[ { id:"bg",type:"background",paint:{"background-color":"#0c100e"} },
+        { id:"sat",type:"raster",source:"sat" },
+        { id:"pnoa",type:"raster",source:"pnoa" },
+        { id:"places",type:"symbol",source:"omt","source-layer":"place",filter:["in",["get","class"],["literal",["city","town","village"]]],layout:{"text-field":["coalesce",["get","name:es"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":12},paint:{"text-color":"#fff","text-halo-color":"#000","text-halo-width":1.5} } ] }; }
+    function buildStyle(f){ if(f==="satelite") return satelliteStyle(); return STYLES[f]||STYLES.aventura; }
 
     const map=new maplibregl.Map({ container:"map", style:buildStyle("aventura"), center:[-3.70,40.42], zoom:5.4, maxPitch:80, attributionControl:false });
     // Atribución legal obligatoria (OSM/OpenFreeMap) pero colapsada a un (i) discreto, no un texto fijo.
@@ -198,12 +202,12 @@
     function ensureDem(){ if(!map.getSource("dem")) map.addSource("dem",{ type:"raster-dem", encoding:"terrarium", tiles:[demSource.sharedDemProtocolUrl], maxzoom:13, tileSize:256 }); }
     function firstSymbol(){ const s=map.getStyle().layers.find(l=>l.type==="symbol"); return s?s.id:undefined; }
     function ensureHillshade(){ if(currentFlavor==="satelite") return; ensureDem(); if(!map.getLayer("hillshade")) map.addLayer({ id:"hillshade", type:"hillshade", source:"dem", minzoom:6, paint:{ "hillshade-exaggeration":0.35 } }, firstSymbol()); }
-    function ensureContours(){ if(!showContours){ ["contour-labels","contour-lines"].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); }); return; }
+    function ensureContours(){ if(!showContours || currentFlavor==="satelite"){ ["contour-labels","contour-lines"].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); }); return; }
       if(!map.getSource("contours")) map.addSource("contours",{ type:"vector", maxzoom:15, tiles:[ demSource.contourProtocolUrl({ multiplier:1, thresholds:{ 10:[500,2000], 11:[200,1000], 12:[100,500], 13:[100,500], 14:[50,250], 15:[20,100] }, elevationKey:"ele", levelKey:"level", contourLayer:"contours" }) ] });
       const before=firstSymbol();
       if(!map.getLayer("contour-lines")) map.addLayer({ id:"contour-lines", type:"line", source:"contours", "source-layer":"contours", minzoom:10, paint:{ "line-color":"rgba(150,110,70,.55)", "line-width":["match",["get","level"],1,1.4,0.6] } }, before);
       if(!map.getLayer("contour-labels")) map.addLayer({ id:"contour-labels", type:"symbol", source:"contours", "source-layer":"contours", minzoom:12, filter:[">",["get","level"],0], layout:{ "symbol-placement":"line", "text-field":["concat",["to-string",["get","ele"]]," m"], "text-font":["Noto Sans Regular"], "text-size":10, "text-max-angle":25 }, paint:{ "text-color":"#c79a64", "text-halo-color":"#0c100e", "text-halo-width":1 } }); }
-    function applyTerrain(animate){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.5 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(animate && map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky(null); }catch(e){} } }
+    function applyTerrain(animate){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.3 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(animate && map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky(null); }catch(e){} } }
     // Cumbres: nombre + altitud de los picos (datos OSM, gratis) — lo que PeakVisor cobra
     function peakSource(){ const s=map.getStyle().sources||{}; return s.openmaptiles?"openmaptiles":(s.omt?"omt":null); }
     function ensurePeaks(){ if(!showPeaks){ if(map.getLayer("peaks")) map.removeLayer("peaks"); return; }
