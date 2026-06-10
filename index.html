@@ -454,16 +454,20 @@
         <button class="m-ghost" id="sosCall">📞 Llamar al 112</button>`);
       $("sosCall").onclick=()=>{ location.href="tel:112"; };
       $("sosSend").onclick=()=>{ const url=l?`https://www.google.com/maps?q=${l.lat},${l.lon}`:""; const txt=`🆘 SOS NOVARA — necesito ayuda. Posición: ${c} ${url}`;
-        if(navigator.share) navigator.share({title:"SOS NOVARA",text:txt}).catch(()=>{}); else if(navigator.clipboard) navigator.clipboard.writeText(txt);
+        if(NATIVE&&NATIVE.share){ try{ NATIVE.share(txt); }catch(_){} } else if(navigator.share) navigator.share({title:"SOS NOVARA",text:txt}).catch(()=>{}); else if(navigator.clipboard) navigator.clipboard.writeText(txt);
         const b=$("sosSend"); b.textContent="✓ SOS difundido"; b.disabled=true; setTimeout(closeModal,1600); }; };
 
     // ----- Mensajes off-grid (LoRa mesh, doble salto) -----
     let loraDevice=null;
-    $("aMesh").onclick=()=>{ closeActions(); const btState=navigator.bluetooth?(loraDevice?`✓ Conectado a ${loraDevice.name||"módulo"}`:"Conectar módulo LoRa (Bluetooth)"):"Bluetooth no soportado aquí — app nativa";
+    $("aMesh").onclick=()=>{ closeActions();
+      const nativeBT = NATIVE && (()=>{ try{ return NATIVE.bluetoothSupported(); }catch(_){ return false; } })();
+      const btState = navigator.bluetooth ? (loraDevice?`✓ Conectado a ${loraDevice.name||"módulo"}`:"Conectar módulo LoRa (Bluetooth)")
+        : nativeBT ? "Bluetooth LE listo · empareja el módulo en Ajustes" : "Bluetooth no soportado aquí — app nativa";
+      const btDisabled = navigator.bluetooth ? "" : "disabled";
       openModal(`<div class="m-emoji">📡</div><h2>Mensajes off-grid</h2>
       <p class="m-sub">Sin cobertura, tu mensaje salta por la malla — <b>gratis, sin operador</b>:</p>
       <div class="m-path">📲 → 📡 → 🗼 → 🛰️ → 🌐</div>
-      <button class="m-ghost" id="loraBtn" ${navigator.bluetooth?"":"disabled"} style="margin-top:0;margin-bottom:10px">${btState}</button>
+      <button class="m-ghost" id="loraBtn" ${btDisabled} style="margin-top:0;margin-bottom:10px">${btState}</button>
       <textarea id="meshTxt" maxlength="160" placeholder="Mensaje corto (máx. 160)…"></textarea>
       <button class="m-primary" id="meshSend">Enviar por la malla</button><div id="meshProg"></div>`);
       $("loraBtn").onclick=async()=>{ if(!navigator.bluetooth) return; $("loraBtn").textContent="Buscando módulo…";
@@ -557,6 +561,7 @@
       }catch(e){ out.innerHTML='<div style="color:var(--muted);font-size:13px">Overpass no responde ahora, reintenta.</div>'; } }
 
     // ----- Análisis del dispositivo: la app comprueba qué puede hacer ESTE móvil -----
+    const NATIVE = (window.Novara && typeof window.Novara.platform==="function") ? window.Novara : null;
     async function runDiag(){ const c=[]; const add=(emoji,name,status,note)=>c.push({emoji,name,status,note}); // status: ok|maybe|no
       // GPS (intento real de fix)
       let g={s:"no",n:"No disponible en este dispositivo"};
@@ -565,7 +570,12 @@
           userLoc={lon:p.coords.longitude,lat:p.coords.latitude}; g={s:"ok",n:`Activo · precisión ±${Math.round(p.coords.accuracy)} m`};
         }catch(e){ g=e&&e.code===1?{s:"no",n:"Permiso denegado — actívalo en el candado"}:{s:"maybe",n:"Sin señal GPS aún (prueba al aire libre)"}; } }
       add("📍","Ubicación GPS",g.s,g.n);
-      add("🛰️","Galileo / multi-GNSS","maybe","Posición sí; leer la constelación Galileo = solo app nativa (apk)");
+      // Galileo: en la app nativa (apk6) sí leemos la constelación real vía GnssStatus.
+      if(NATIVE){ let gn=null; try{ gn=JSON.parse(NATIVE.gnss()); }catch(_){}
+        if(gn&&gn.galileoUsed>0) add("🛰️","Galileo / multi-GNSS","ok",`Galileo EN USO · ${gn.galileoUsed} satélites fijando (${gn.galileoSeen} a la vista) · total ${gn.totalUsed}`);
+        else if(gn&&gn.galileoSeen>0) add("🛰️","Galileo / multi-GNSS","maybe",`Galileo visible (${gn.galileoSeen}); fijando posición…`);
+        else add("🛰️","Galileo / multi-GNSS","maybe","GNSS nativo activo; buscando Galileo (sal a cielo abierto)");
+      } else add("🛰️","Galileo / multi-GNSS","maybe","Posición sí; leer la constelación Galileo = solo app nativa (apk)");
       // Brújula (intento real de leer rumbo)
       let cp={s:"no",n:"Sensor no detectado"};
       if(window.DeviceOrientationEvent){ cp={s:"maybe",n:"Sensor presente — falta permiso"};
@@ -581,10 +591,12 @@
       add("⬇️","Mapas offline",off.s,off.n);
       // Bluetooth → módulo LoRa
       let bt={s:"no",n:"No soportado en este navegador (usa la app nativa)"};
-      if(navigator.bluetooth){ bt={s:"ok",n:"Puedes emparejar un módulo LoRa/Meshtastic por Bluetooth"};
+      if(NATIVE){ let ok=false; try{ ok=NATIVE.bluetoothSupported(); }catch(_){} bt= ok?{s:"ok",n:"Bluetooth LE disponible para módulo LoRa/Meshtastic"}:{s:"no",n:"Este móvil no tiene Bluetooth LE"}; }
+      else if(navigator.bluetooth){ bt={s:"ok",n:"Puedes emparejar un módulo LoRa/Meshtastic por Bluetooth"};
         try{ const av=await navigator.bluetooth.getAvailability(); if(!av) bt={s:"maybe",n:"API presente; enciende el Bluetooth"}; }catch(_){} }
       add("📡","Bluetooth (módulo LoRa)",bt.s,bt.n);
-      add("🆘","Compartir / SOS", navigator.share?"ok":"maybe", navigator.share?"Compartir nativo (difundir posición)":"Copia al portapapeles");
+      const canShare=NATIVE||navigator.share;
+      add("🆘","Compartir / SOS", canShare?"ok":"maybe", canShare?"Compartir nativo (difundir posición)":"Copia al portapapeles");
       add("☎️","Llamada de emergencia 112","ok","Disponible");
       add("📳","Vibración / alertas", navigator.vibrate?"ok":"no", navigator.vibrate?"Disponible":"No disponible");
       add("🔆","Pantalla activa en ruta", ("wakeLock" in navigator)?"ok":"maybe", ("wakeLock" in navigator)?"Mantiene la pantalla encendida":"Limitado en este navegador");
@@ -596,7 +608,8 @@
         <p class="m-sub">NOVARA comprueba qué puede hacer ESTE dispositivo. <span style="color:#3ad07a">●</span> listo · <span style="color:#f0b24a">●</span> con permiso/condición · <span style="color:#e23b34">●</span> no disponible.</p>
         <div id="diagOut"><div style="text-align:center;color:var(--muted);font-size:13px;padding:24px">Analizando hardware… (concede permisos si los pide)</div></div>`);
       const checks=await runDiag(); const dot={ok:"#3ad07a",maybe:"#f0b24a",no:"#e23b34"}, okN=checks.filter(c=>c.status==="ok").length;
-      $("diagOut").innerHTML=`<div style="text-align:center;font-weight:800;font-size:16px;margin-bottom:4px">${okN} de ${checks.length} funciones listas</div>
+      let modeBanner=""; if(NATIVE){ let v=""; try{ v=NATIVE.appVersion(); }catch(_){} modeBanner=`<div style="text-align:center;margin-bottom:8px"><span style="display:inline-block;padding:5px 12px;border-radius:20px;background:rgba(52,224,196,.16);border:1px solid rgba(52,224,196,.5);color:var(--cool);font-size:12px;font-weight:800">📱 App nativa ${v||"apk6"} · Galileo + LoRa activos</span></div>`; }
+      $("diagOut").innerHTML=`${modeBanner}<div style="text-align:center;font-weight:800;font-size:16px;margin-bottom:4px">${okN} de ${checks.length} funciones listas</div>
         <div class="m-sub" style="margin-bottom:12px">en este móvil, ahora mismo</div>
         <div class="m-list">${checks.map(c=>`<div class="pr" style="display:flex;align-items:center;gap:11px;cursor:default">
           <span style="width:11px;height:11px;border-radius:50%;background:${dot[c.status]};flex:none;box-shadow:0 0 8px ${dot[c.status]}66"></span>
