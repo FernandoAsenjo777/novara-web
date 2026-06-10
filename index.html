@@ -266,7 +266,16 @@
     }
     function buildStyle(f){ if(f==="satelite") return satelliteStyle(); return STYLES[f]||STYLES.aventura; }
 
-    const map=new maplibregl.Map({ container:"map", style:buildStyle("aventura"), center:[-3.70,40.42], zoom:5.4, maxPitch:80, attributionControl:false });
+    const map=new maplibregl.Map({ container:"map", style:buildStyle("aventura"), center:[-3.70,40.42], zoom:5.4,
+      minZoom:2, maxZoom:19, maxPitch:80, attributionControl:false,
+      // Navegación premium: inclinar con 2 dedos (touchPitch), girar con 2 dedos, doble-tap zoom,
+      // snap al norte, taps tolerantes y fundido suave de teselas. (Como Google/Apple Maps.)
+      pitchWithRotate:true, dragRotate:true, touchZoomRotate:true, touchPitch:true,
+      doubleClickZoom:true, bearingSnap:6, clickTolerance:4, fadeDuration:140 });
+    // Glide cinemático (curva tipo Google Earth) para ir a un sitio; respeta el 3D si está activo.
+    function glideTo(center, zoom, extra){ map.flyTo(Object.assign({ center, zoom, curve:1.42, speed:1.05, essential:true }, extra||{})); }
+    // fitBounds suave y consistente para rutas/tracks.
+    function frame(b, padding){ map.fitBounds(b, { padding, duration:900, essential:true, maxZoom:16 }); }
     // Atribución legal obligatoria (OSM/OpenFreeMap) pero colapsada a un (i) discreto, no un texto fijo.
     map.addControl(new maplibregl.AttributionControl({ compact:true }), "bottom-right");
     const collapseAttrib=()=>{ const at=document.querySelector(".maplibregl-ctrl-attrib"); if(at) at.classList.remove("maplibregl-compact-show"); };
@@ -424,7 +433,7 @@
         const j=await (await fetch(url)).json(); if(!j.routes||!j.routes[0]){ rb.innerHTML="Sin ruta disponible."; return; }
         const r=j.routes[0]; routeGeoJSON={type:"Feature",geometry:r.geometry}; ensureRouteLayer(); steps=(r.legs[0]&&r.legs[0].steps)||[];
         renderRouteBox(mode,r.distance,r.duration); elevationProfile(r.geometry.coordinates,$("elevBox"));
-        const cs=r.geometry.coordinates,b=new maplibregl.LngLatBounds(cs[0],cs[0]); cs.forEach(c=>b.extend(c)); map.fitBounds(b,{padding:{top:130,bottom:320,left:40,right:40}});
+        const cs=r.geometry.coordinates,b=new maplibregl.LngLatBounds(cs[0],cs[0]); cs.forEach(c=>b.extend(c)); frame(b,{top:130,bottom:320,left:40,right:40});
       }catch(e){ rb.innerHTML="Error de ruta"; showErr("ruta: "+e); } }
     function renderRouteBox(mode,distM,timeS){ const rb=$("routeBox");
       rb.innerHTML=`<div class="modes">${["coche","pie","bici"].map(m=>`<span class="mode ${m===mode?'on':''}" data-mode="${m}">${MODEI[m]}</span>`).join("")}<b style="margin-left:auto">${fmtDist(distM)} · ${fmtTime(timeS)}</b></div>
@@ -457,10 +466,10 @@
     async function doSearch(v){ try{ const j=await (await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(v)}&limit=6&lang=default`)).json(); results.innerHTML="";
         (j.features||[]).forEach(f=>{ const p=f.properties,[lon,lat]=f.geometry.coordinates; const name=p.name||p.street||"(sin nombre)"; const sub=[p.city,p.state,p.country].filter(Boolean).join(", "); const cat=p.osm_value||p.type||"";
           const row=document.createElement("div"); row.className="row"; row.innerHTML=`<div class="t">${name}</div><div class="s">${sub}</div>`;
-          row.onclick=()=>{ results.classList.remove("show"); q.value=name; map.flyTo({center:[lon,lat],zoom:14}); dropPin(lon,lat); showPlace({name,sub,lon,lat,cat}); }; results.appendChild(row); });
+          row.onclick=()=>{ results.classList.remove("show"); q.value=name; glideTo([lon,lat],14); dropPin(lon,lat); showPlace({name,sub,lon,lat,cat}); }; results.appendChild(row); });
         results.classList.add("show"); }catch(e){ showErr("búsqueda: "+e); } }
 
-    $("locBtn").onclick=async()=>{ requestOrient(); try{ const l=await getLoc(); if(userMarker) userMarker.remove(); userMarker=new maplibregl.Marker({element:userEl()}).setLngLat([l.lon,l.lat]).addTo(map); updateUserHeading(); map.flyTo({center:[l.lon,l.lat],zoom:15}); }catch(e){ showErr("ubicación: "+e); } };
+    $("locBtn").onclick=async()=>{ requestOrient(); try{ const l=await getLoc(); if(userMarker) userMarker.remove(); userMarker=new maplibregl.Marker({element:userEl()}).setLngLat([l.lon,l.lat]).addTo(map); updateUserHeading(); glideTo([l.lon,l.lat],15); }catch(e){ showErr("ubicación: "+e); } };
 
     map.on("contextmenu", e=>{ const {lng,lat}=e.lngLat; dropPin(lng,lat); showPlace({name:"Punto en el mapa",sub:"",lon:lng,lat,cat:""}); });
 
@@ -469,14 +478,14 @@
     function trackDist(t){ let d=0; for(let i=1;i<t.length;i++) d+=haversine({lon:t[i-1][0],lat:t[i-1][1]},{lon:t[i][0],lat:t[i][1]}); return d; }
     function toggleRecord(){ if(recording){ stopRecord(); return; } if(!navigator.geolocation){ showErr("sin GPS"); return; }
       requestOrient(); recording=true; track=[]; $("trackBtn").textContent="■"; const rp=$("recPill"); rp.style.display="block"; rp.textContent="● Grabando · 0 m";
-      watchId=navigator.geolocation.watchPosition(pos=>{ track.push([pos.coords.longitude,pos.coords.latitude]); trackGeoJSON={type:"Feature",geometry:{type:"LineString",coordinates:track.length>1?track:[track[0],track[0]]}}; ensureTrackLayer(); rp.textContent="● Grabando · "+fmtDist(trackDist(track))+" · "+track.length+" pts"; if(track.length===1) map.flyTo({center:track[0],zoom:16}); }, e=>showErr("GPS: "+e.message), {enableHighAccuracy:true,maximumAge:1000}); }
+      watchId=navigator.geolocation.watchPosition(pos=>{ track.push([pos.coords.longitude,pos.coords.latitude]); trackGeoJSON={type:"Feature",geometry:{type:"LineString",coordinates:track.length>1?track:[track[0],track[0]]}}; ensureTrackLayer(); rp.textContent="● Grabando · "+fmtDist(trackDist(track))+" · "+track.length+" pts"; if(track.length===1) glideTo(track[0],16); }, e=>showErr("GPS: "+e.message), {enableHighAccuracy:true,maximumAge:1000}); }
     function stopRecord(){ recording=false; if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; } $("trackBtn").textContent="▶"; $("recPill").style.display="none";
       if(track.length<2){ showPlace({name:"Track sin movimiento",sub:"Muévete para grabar un recorrido.",lon:map.getCenter().lng,lat:map.getCenter().lat}); return; }
       lastTrack=track.slice(); const tr=JSON.parse(localStorage.getItem("novara.tracks")||"[]"); tr.push({when:Date.now(),pts:lastTrack}); localStorage.setItem("novara.tracks",JSON.stringify(tr));
       $("sheetTitle").textContent="✓ Track guardado"; $("sheetSub").textContent=fmtDist(trackDist(lastTrack))+" · "+lastTrack.length+" puntos"; $("sheetMeta").textContent="";
       const rb=$("routeBox"); rb.style.display="block"; rb.innerHTML=`<div id="elevBox"></div><button class="startnav" id="tbBtn">↩ TrackBack — volver por tu rastro</button>`; elevationProfile(lastTrack,$("elevBox")); $("tbBtn").onclick=trackBack; sheet.classList.add("open"); }
     function trackBack(){ if(!lastTrack||lastTrack.length<2) return; routeGeoJSON={type:"Feature",geometry:{type:"LineString",coordinates:lastTrack.slice().reverse()}}; ensureRouteLayer();
-      const cs=routeGeoJSON.geometry.coordinates,b=new maplibregl.LngLatBounds(cs[0],cs[0]); cs.forEach(c=>b.extend(c)); map.fitBounds(b,{padding:70}); $("sheetTitle").textContent="↩ TrackBack activo"; $("sheetSub").textContent="Sigue la línea para volver por donde viniste"; }
+      const cs=routeGeoJSON.geometry.coordinates,b=new maplibregl.LngLatBounds(cs[0],cs[0]); cs.forEach(c=>b.extend(c)); frame(b,70); $("sheetTitle").textContent="↩ TrackBack activo"; $("sheetSub").textContent="Sigue la línea para volver por donde viniste"; }
     $("trackBtn").onclick=toggleRecord;
 
     // ===== ACCIONES (SOS, off-grid, descarga, planificar, chincheta, POI) =====
@@ -623,7 +632,7 @@
           const el=document.createElement("div"); el.textContent="📍"; el.style.cssText="font-size:20px;cursor:pointer";
           poiMarkers.push(new maplibregl.Marker({element:el,anchor:"bottom"}).setLngLat([lon,lat]).addTo(map)); return {name,lat,lon}; });
         out.innerHTML=`<div class="m-list">${items.map((p,i)=>`<div class="pr" data-i="${i}"><b>${p.name}</b>${userLoc?` <span class="d">· a ${fmtDist(haversine(userLoc,{lon:p.lon,lat:p.lat}))}</span>`:""}</div>`).join("")}</div>`;
-        out.querySelectorAll(".pr").forEach(r=>r.onclick=()=>{ const p=items[+r.dataset.i]; closeModal(); map.flyTo({center:[p.lon,p.lat],zoom:15}); dropPin(p.lon,p.lat); showPlace({name:p.name,sub:POI_CATS[cat].label,lon:p.lon,lat:p.lat,cat:""}); });
+        out.querySelectorAll(".pr").forEach(r=>r.onclick=()=>{ const p=items[+r.dataset.i]; closeModal(); glideTo([p.lon,p.lat],15); dropPin(p.lon,p.lat); showPlace({name:p.name,sub:POI_CATS[cat].label,lon:p.lon,lat:p.lat,cat:""}); });
       }catch(e){ out.innerHTML='<div style="color:var(--muted);font-size:13px">Overpass no responde ahora, reintenta.</div>'; } }
 
     // ----- Análisis del dispositivo: la app comprueba qué puede hacer ESTE móvil -----
