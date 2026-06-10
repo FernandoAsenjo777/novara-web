@@ -178,14 +178,27 @@
     const SENDAS=["https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png"];
     // Aventura = OpenFreeMap "liberty" (vector, con relieve, rápido). OpenTopoMap (raster lento/feo) RETIRADO.
     const STYLES={ aventura:"https://tiles.openfreemap.org/styles/liberty", mapa:"https://tiles.openfreemap.org/styles/bright", noche:"https://tiles.openfreemap.org/styles/dark" };
-    function satelliteStyle(){ return { version:8, glyphs:OFM_FONTS,
-      sources:{ sat:{ type:"raster", tiles:SAT, tileSize:256, attribution:"Sentinel-2 cloudless · EOX (CC-BY) · ESA" },
-        pnoa:{ type:"raster", tiles:PNOA, tileSize:256, attribution:"PNOA © Instituto Geográfico Nacional de España" },
-        omt:{ type:"vector", url:"https://tiles.openfreemap.org/planet" } },
-      layers:[ { id:"bg",type:"background",paint:{"background-color":"#0c100e"} },
-        { id:"sat",type:"raster",source:"sat" },
-        { id:"pnoa",type:"raster",source:"pnoa" },
-        { id:"places",type:"symbol",source:"omt","source-layer":"place",filter:["in",["get","class"],["literal",["city","town","village"]]],layout:{"text-field":["coalesce",["get","name:es"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":12},paint:{"text-color":"#fff","text-halo-color":"#000","text-halo-width":1.5} } ] }; }
+    // URL TileJSON del planeta vector (OpenFreeMap) — fuente de las cumbres también en satélite.
+    const OMT_PLANET="https://tiles.openfreemap.org/planet";
+    function satelliteStyle(){
+      // Satélite = raster ligero (Sentinel-2 mundial + PNOA alta-res en España) + una fuente
+      // vectorial dedicada "omt" SOLO para los nombres de cumbres (como hace PeakVisor, gratis).
+      // Las cumbres se añaden luego en ensurePeaks(); aquí solo declaramos la fuente y el orden.
+      return { version:8, glyphs:OFM_FONTS,
+        sources:{
+          // maxzoom cap = clave: Sentinel-2 es 10 m/píxel (máx útil ~z14); sin cap, MapLibre pide
+          // tiles inexistentes a z15+ → 404 → mapa NEGRO. Con maxzoom hace overzoom (estira el
+          // último tile, nunca negro). PNOA (España, 0,5 m) sí llega nítido a z19.
+          sat:{ type:"raster", tiles:SAT, tileSize:256, maxzoom:14, attribution:"Sentinel-2 cloudless · EOX (CC-BY) · ESA" },
+          pnoa:{ type:"raster", tiles:PNOA, tileSize:256, maxzoom:19, attribution:"PNOA © Instituto Geográfico Nacional de España" },
+          omt:{ type:"vector", url:OMT_PLANET }
+        },
+        layers:[
+          { id:"bg", type:"background", paint:{ "background-color":"#0c100e" } },
+          { id:"sat", type:"raster", source:"sat" },
+          { id:"pnoa", type:"raster", source:"pnoa", minzoom:7 }
+        ] };
+    }
     function buildStyle(f){ if(f==="satelite") return satelliteStyle(); return STYLES[f]||STYLES.aventura; }
 
     const map=new maplibregl.Map({ container:"map", style:buildStyle("aventura"), center:[-3.70,40.42], zoom:5.4, maxPitch:80, attributionControl:false });
@@ -223,9 +236,14 @@
     let currentFlavor="aventura", sendasOn=false;
 
     $("layersBtn").onclick=()=>$("layerPicker").classList.toggle("open");
+    // Cambio de capa robusto: entre vector (liberty) y raster (satélite) el "style diff" de
+    // MapLibre revienta (_checkLoaded / AbortError) → forzamos rebuild limpio (diff:false) y
+    // bloqueamos clicks mientras se reconstruye, para que no se solapen dos setStyle.
+    let styleSwitching=false;
+    function setFlavor(flavor){ if(styleSwitching||flavor===currentFlavor) return; styleSwitching=true; currentFlavor=flavor; map.setStyle(buildStyle(flavor),{diff:false}); }
     document.querySelectorAll(".lp[data-flavor]").forEach(b=>b.addEventListener("click",()=>{
       document.querySelectorAll(".lp[data-flavor]").forEach(x=>x.classList.remove("on"));
-      b.classList.add("on"); currentFlavor=b.dataset.flavor; map.setStyle(buildStyle(currentFlavor)); $("layerPicker").classList.remove("open"); }));
+      b.classList.add("on"); setFlavor(b.dataset.flavor); $("layerPicker").classList.remove("open"); }));
     $("curvasChip").onclick=()=>{ showContours=!showContours; $("curvasChip").classList.toggle("on",showContours); ensureContours(); };
     $("peaksChip").onclick=()=>{ showPeaks=!showPeaks; $("peaksChip").classList.toggle("on",showPeaks); ensurePeaks(); };
     $("d3Chip").onclick=()=>{ is3D=!is3D; $("d3Chip").classList.toggle("on",is3D); applyTerrain(true); };
@@ -241,7 +259,9 @@
     function ensureSendas(){ if(!sendasOn) return;
       if(!map.getSource("sendas")) map.addSource("sendas",{type:"raster",tiles:SENDAS,tileSize:256,attribution:"© Waymarked Trails (CC-BY-SA)"});
       if(!map.getLayer("sendas-layer")) map.addLayer({id:"sendas-layer",type:"raster",source:"sendas",paint:{"raster-opacity":0.85}}); }
-    map.on("style.load", ()=>{ ensureHillshade(); ensureContours(); ensurePeaks(); ensureRouteLayer(); ensureTrackLayer(); ensureSendas(); applyTerrain(false); updateCompass(); collapseAttrib(); });
+    function addOverlays(){ ensureHillshade(); ensureContours(); ensurePeaks(); ensureRouteLayer(); ensureTrackLayer(); ensureSendas(); }
+    map.on("style.load", ()=>{ styleSwitching=false; addOverlays(); applyTerrain(false); updateCompass(); collapseAttrib(); setTimeout(addOverlays,700); });
+    map.on("idle", addOverlays); // robusto: garantiza overlays (cumbres, curvas…) cuando el mapa se asienta
 
     // ===== brújula (orientación del mapa) + reset norte =====
     function updateCompass(){ $("compassRose").style.transform=`rotate(${-map.getBearing()}deg)`; }
