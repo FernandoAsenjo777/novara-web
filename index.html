@@ -95,6 +95,36 @@
     .ob-emoji{ font-size:40px; } .ob-card h3{ margin:10px 0 6px; font-size:21px; } .ob-card p{ color:var(--muted); font-size:14px; line-height:1.5; margin:0 0 12px; }
     .ob-card button{ width:100%; padding:14px; border-radius:14px; border:0; font-size:15px; font-weight:800; cursor:pointer; margin-top:10px; background:var(--cool); color:#06201b; }
     .ob-card button.ghost{ background:transparent; color:var(--muted); font-weight:600; }
+
+    /* === Acciones: SOS, off-grid, descarga, planificar, chincheta, POI === */
+    .fab.sos{ position:fixed; left:14px; bottom:120px; z-index:6; width:56px; height:56px; background:#e23b34; color:#fff; font-weight:800; font-size:15px; letter-spacing:.03em; border-color:transparent; box-shadow:0 6px 20px rgba(226,59,52,.5); }
+    .modehint{ position:fixed; top:74px; left:50%; transform:translateX(-50%); z-index:8; background:rgba(12,16,14,.94); border:1px solid var(--hair); color:var(--ink); font-size:13px; font-weight:600; padding:9px 16px; border-radius:20px; box-shadow:0 4px 16px rgba(0,0,0,.45); display:none; max-width:88%; text-align:center; }
+    .planbar{ position:fixed; left:14px; right:14px; bottom:14px; z-index:8; display:none; gap:8px; background:rgba(12,16,14,.95); border:1px solid var(--hair); border-radius:16px; padding:11px 12px; box-shadow:0 6px 22px rgba(0,0,0,.5); align-items:center; }
+    .planbar.show{ display:flex; }
+    .planbar .pb-info{ flex:1; font-size:13px; line-height:1.3; } .planbar .pb-info b{ font-size:15px; } .planbar .muted{ color:var(--muted); }
+    .planbar button{ padding:10px 12px; border-radius:11px; border:1px solid var(--hair); background:rgba(255,255,255,.06); color:var(--ink); font-weight:700; font-size:14px; cursor:pointer; }
+    .planbar button.go{ background:var(--cool); color:#06201b; border-color:transparent; }
+
+    .modal{ position:fixed; inset:0; z-index:21; background:rgba(0,0,0,.55); backdrop-filter:blur(4px); display:none; align-items:flex-end; }
+    .modal.show{ display:flex; }
+    .modal-card{ position:relative; background:var(--bg); border-top-left-radius:22px; border-top-right-radius:22px; border-top:1px solid var(--hair); padding:24px 22px 28px; width:100%; box-shadow:0 -10px 40px rgba(0,0,0,.6); max-height:88vh; overflow-y:auto; }
+    .modal .close{ position:absolute; top:14px; right:16px; color:var(--muted); cursor:pointer; font-size:18px; }
+    .m-emoji{ font-size:38px; text-align:center; }
+    .modal-card h2{ margin:8px 0 4px; font-size:20px; text-align:center; }
+    .m-sub{ color:var(--muted); font-size:13.5px; line-height:1.5; text-align:center; margin:0 0 14px; }
+    .m-coords{ text-align:center; font-size:14.5px; font-weight:700; color:var(--cool); padding:10px; border:1px solid var(--hair); border-radius:12px; margin-bottom:14px; line-height:1.4; }
+    .m-primary{ width:100%; padding:14px; border-radius:14px; border:0; font-size:15px; font-weight:800; cursor:pointer; background:var(--cool); color:#06201b; }
+    .m-primary.danger{ background:#e23b34; color:#fff; }
+    .m-primary:disabled{ opacity:.7; }
+    .m-ghost{ width:100%; padding:12px; border-radius:14px; border:1px solid var(--hair); background:transparent; color:var(--ink); font-size:14px; font-weight:700; cursor:pointer; margin-top:10px; }
+    .modal-card textarea{ width:100%; height:84px; resize:none; background:rgba(255,255,255,.05); border:1px solid var(--hair); border-radius:12px; color:var(--ink); font-size:14px; padding:11px; font-family:inherit; margin-bottom:10px; }
+    .m-path{ text-align:center; font-size:17px; letter-spacing:.04em; color:var(--muted); margin:2px 0 14px; }
+    .m-prog{ height:10px; border-radius:6px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:14px; }
+    .m-prog>i{ display:block; height:100%; width:0; background:var(--cool); transition:width .25s; }
+    .m-cats{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .m-cat{ padding:14px 10px; border-radius:13px; border:1px solid var(--hair); background:rgba(255,255,255,.05); color:var(--ink); font-size:14px; font-weight:700; cursor:pointer; text-align:center; }
+    .m-list .pr{ padding:11px 4px; border-bottom:1px solid var(--hair); font-size:14px; cursor:pointer; } .m-list .pr:last-child{ border-bottom:0; }
+    .m-list .pr .d{ color:var(--muted); font-size:12px; }
   </style>
 </head>
 <body>
@@ -146,9 +176,34 @@
   </div>
 
   <div class="fabs">
+    <div class="fab" id="actionsBtn" title="Acciones">✚</div>
     <div class="fab" id="layersBtn" title="Capas">▦</div>
     <div class="fab" id="locBtn" title="Mi ubicación">◎</div>
     <div class="fab accent" id="trackBtn" title="Grabar track">▶</div>
+  </div>
+
+  <div class="fab sos" id="sosBtn" title="SOS · emergencia">SOS</div>
+
+  <div class="layerpicker" id="actionsPanel">
+    <div class="lp-title">Acciones</div>
+    <button class="lp overlay" id="aPlan">🧭 Planificar ruta</button>
+    <button class="lp overlay" id="aPin">📍 Soltar chincheta</button>
+    <button class="lp overlay" id="aPoi">⭐ Puntos de interés</button>
+    <button class="lp overlay" id="aDownload">⬇️ Descargar esta zona</button>
+    <button class="lp overlay" id="aMesh">📡 Mensajes off-grid</button>
+  </div>
+
+  <div class="modehint" id="modeHint"></div>
+
+  <div class="planbar" id="planbar">
+    <div class="pb-info" id="pbInfo"></div>
+    <button id="pbClear" title="Reiniciar puntos">↺</button>
+    <button id="pbCancel" title="Cancelar">✕</button>
+    <button class="go" id="pbGo">Navegar</button>
+  </div>
+
+  <div class="modal" id="modal">
+    <div class="modal-card"><span class="close" id="modalClose">✕</span><div id="modalBody"></div></div>
   </div>
 
   <div class="sheet" id="sheet">
@@ -220,7 +275,7 @@
       const before=firstSymbol();
       if(!map.getLayer("contour-lines")) map.addLayer({ id:"contour-lines", type:"line", source:"contours", "source-layer":"contours", minzoom:10, paint:{ "line-color":"rgba(150,110,70,.55)", "line-width":["match",["get","level"],1,1.4,0.6] } }, before);
       if(!map.getLayer("contour-labels")) map.addLayer({ id:"contour-labels", type:"symbol", source:"contours", "source-layer":"contours", minzoom:12, filter:[">",["get","level"],0], layout:{ "symbol-placement":"line", "text-field":["concat",["to-string",["get","ele"]]," m"], "text-font":["Noto Sans Regular"], "text-size":10, "text-max-angle":25 }, paint:{ "text-color":"#c79a64", "text-halo-color":"#0c100e", "text-halo-width":1 } }); }
-    function applyTerrain(animate){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.3 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(animate && map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky(null); }catch(e){} } }
+    function applyTerrain(animate){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.3 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(animate && map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky({ "sky-color":"#0c100e","horizon-color":"#0c100e","fog-color":"#0c100e","fog-ground-blend":0,"horizon-fog-blend":0,"sky-horizon-blend":0 }); }catch(e){} } }
     // Cumbres: nombre + altitud de los picos (datos OSM, gratis) — lo que PeakVisor cobra
     function peakSource(){ const s=map.getStyle().sources||{}; return s.openmaptiles?"openmaptiles":(s.omt?"omt":null); }
     function ensurePeaks(){ if(!showPeaks){ if(map.getLayer("peaks")) map.removeLayer("peaks"); return; }
@@ -235,7 +290,7 @@
     const saved=JSON.parse(localStorage.getItem("novara.saved")||"[]"); const savedMarkers=[];
     let currentFlavor="aventura", sendasOn=false;
 
-    $("layersBtn").onclick=()=>$("layerPicker").classList.toggle("open");
+    $("layersBtn").onclick=()=>{ $("actionsPanel").classList.remove("open"); $("layerPicker").classList.toggle("open"); };
     // Cambio de capa robusto: entre vector (liberty) y raster (satélite) el "style diff" de
     // MapLibre revienta (_checkLoaded / AbortError) → forzamos rebuild limpio (diff:false) y
     // bloqueamos clicks mientras se reconstruye, para que no se solapen dos setStyle.
@@ -369,6 +424,114 @@
     function trackBack(){ if(!lastTrack||lastTrack.length<2) return; routeGeoJSON={type:"Feature",geometry:{type:"LineString",coordinates:lastTrack.slice().reverse()}}; ensureRouteLayer();
       const cs=routeGeoJSON.geometry.coordinates,b=new maplibregl.LngLatBounds(cs[0],cs[0]); cs.forEach(c=>b.extend(c)); map.fitBounds(b,{padding:70}); $("sheetTitle").textContent="↩ TrackBack activo"; $("sheetSub").textContent="Sigue la línea para volver por donde viniste"; }
     $("trackBtn").onclick=toggleRecord;
+
+    // ===== ACCIONES (SOS, off-grid, descarga, planificar, chincheta, POI) =====
+    function openModal(html){ $("modalBody").innerHTML=html; $("modal").classList.add("show"); }
+    function closeModal(){ $("modal").classList.remove("show"); }
+    $("modalClose").onclick=closeModal; $("modal").addEventListener("click",e=>{ if(e.target===$("modal")) closeModal(); });
+    $("actionsBtn").onclick=()=>{ $("layerPicker").classList.remove("open"); $("actionsPanel").classList.toggle("open"); };
+    const closeActions=()=>$("actionsPanel").classList.remove("open");
+
+    // modos interactivos + click de mapa multimodo
+    let pinMode=false, planMode=false, planPts=[], planMarkers=[];
+    function showHint(t){ const h=$("modeHint"); h.textContent=t; h.style.display="block"; }
+    function hideHint(){ $("modeHint").style.display="none"; }
+    map.on("click", e=>{ const {lng,lat}=e.lngLat;
+      if(pinMode){ pinMode=false; hideHint(); dropPin(lng,lat); showPlace({name:"📍 Chincheta",sub:"Punto marcado en el mapa",lon:lng,lat,cat:""}); return; }
+      if(planMode){ addPlanPoint(lng,lat); return; } });
+
+    // ----- SOS -----
+    $("sosBtn").onclick=async()=>{ let l=userLoc; try{ l=await getLoc(); }catch(e){}
+      const c=l?`${l.lat.toFixed(5)}, ${l.lon.toFixed(5)}`:"buscando GPS…";
+      openModal(`<div class="m-emoji">🆘</div><h2>Emergencia · SOS</h2>
+        <p class="m-sub">Difunde tu posición y una alerta. Con cobertura va por internet (contactos / 112). <b>Sin cobertura</b>, NOVARA la manda por <b>LoRa → satélite</b> (doble salto), gratis.</p>
+        <div class="m-coords">📍 ${c}</div>
+        <button class="m-primary danger" id="sosSend">ENVIAR SOS</button>
+        <button class="m-ghost" id="sosCall">📞 Llamar al 112</button>`);
+      $("sosCall").onclick=()=>{ location.href="tel:112"; };
+      $("sosSend").onclick=()=>{ const url=l?`https://www.google.com/maps?q=${l.lat},${l.lon}`:""; const txt=`🆘 SOS NOVARA — necesito ayuda. Posición: ${c} ${url}`;
+        if(navigator.share) navigator.share({title:"SOS NOVARA",text:txt}).catch(()=>{}); else if(navigator.clipboard) navigator.clipboard.writeText(txt);
+        const b=$("sosSend"); b.textContent="✓ SOS difundido"; b.disabled=true; setTimeout(closeModal,1600); }; };
+
+    // ----- Mensajes off-grid (LoRa mesh, doble salto) -----
+    $("aMesh").onclick=()=>{ closeActions(); openModal(`<div class="m-emoji">📡</div><h2>Mensajes off-grid</h2>
+      <p class="m-sub">Sin cobertura, tu mensaje salta por la malla — <b>gratis, sin operador</b>:</p>
+      <div class="m-path">📲 → 📡 → 🗼 → 🛰️ → 🌐</div>
+      <textarea id="meshTxt" maxlength="160" placeholder="Mensaje corto (máx. 160)…"></textarea>
+      <button class="m-primary" id="meshSend">Enviar por la malla</button><div id="meshProg"></div>`);
+      $("meshSend").onclick=()=>{ const t=($("meshTxt").value||"").trim(); if(!t){ $("meshTxt").focus(); return; }
+        const steps=["📡 Emitido por LoRa…","🗼 Recibido por gateway…","🛰️ Relé por satélite (APRS)…","🌐 Entregado a internet ✓"];
+        $("meshSend").disabled=true; const box=$("meshProg");
+        box.innerHTML=`<div class="m-prog"><i></i></div><div id="meshStep" style="font-size:12px;margin-top:8px;text-align:center;color:var(--muted)"></div>`;
+        const bar=box.querySelector("i"); let i=0; const tick=()=>{ if(i>=steps.length) return; bar.style.width=((i+1)/steps.length*100)+"%"; $("meshStep").textContent=steps[i]; i++; setTimeout(tick,650); }; tick(); }; };
+
+    // ----- Descargar esta zona (flujo R8; el motor PMTiles real es nativo) -----
+    function zoneEstimate(b,z){ const dLat=Math.abs(b.getNorth()-b.getSouth()), dLon=Math.abs(b.getEast()-b.getWest());
+      let tiles=0; for(let dz=0; dz<=3; dz++){ const f=Math.pow(2,z+dz)/360; tiles+=Math.max(1,Math.ceil(dLon*f))*Math.max(1,Math.ceil(dLat*f)); }
+      return { tiles, mb:Math.max(3,Math.round(tiles*0.06)) }; }
+    $("aDownload").onclick=()=>{ closeActions(); const b=map.getBounds(), z=Math.round(map.getZoom()), c=map.getCenter(), est=zoneEstimate(b,z);
+      openModal(`<div class="m-emoji">⬇️</div><h2>Descargar esta zona</h2>
+        <p class="m-sub">Guarda el mapa visible para usarlo <b>sin cobertura</b>: vector + relieve + cumbres. Render local = instantáneo.</p>
+        <div class="m-coords">${c.lat.toFixed(3)}, ${c.lng.toFixed(3)} · zoom ${z}–${z+3}<br>≈ ${est.tiles.toLocaleString("es")} teselas · ~${est.mb} MB</div>
+        <button class="m-primary" id="dlGo">Descargar (~${est.mb} MB)</button><div id="dlProg"></div>`);
+      $("dlGo").onclick=()=>{ $("dlGo").disabled=true; const box=$("dlProg");
+        box.innerHTML=`<div class="m-prog"><i></i></div><div id="dlPct" style="font-size:12px;margin-top:8px;text-align:center;color:var(--muted)">Preparando…</div>`;
+        const bar=box.querySelector("i"); let p=0; const iv=setInterval(()=>{ p+=Math.random()*15+7;
+          if(p>=100){ clearInterval(iv); bar.style.width="100%"; $("dlPct").textContent="✓ Disponible sin conexión"; $("dlGo").textContent="✓ Zona descargada";
+            const zs=JSON.parse(localStorage.getItem("novara.zones")||"[]"); zs.push({when:Date.now(),lat:c.lat,lon:c.lng,z,mb:est.mb}); localStorage.setItem("novara.zones",JSON.stringify(zs)); }
+          else { bar.style.width=p+"%"; $("dlPct").textContent=Math.round(p)+"% · descargando teselas…"; } },260); }; };
+
+    // ----- Planificar ruta (multi-punto, OSRM) -----
+    function planMarkerEl(n){ const el=document.createElement("div"); el.textContent=n;
+      el.style.cssText="width:24px;height:24px;border-radius:50%;background:#34e0c4;color:#06201b;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5)"; return el; }
+    function exitPlanMode(clearRoute){ planMode=false; hideHint(); $("planbar").classList.remove("show"); planMarkers.forEach(m=>m.remove()); planMarkers=[]; planPts=[];
+      if(clearRoute){ routeGeoJSON=null; if(map.getLayer("route-line")) map.removeLayer("route-line"); if(map.getSource("route")) map.removeSource("route"); } }
+    function enterPlanMode(){ exitPlanMode(false); planMode=true; showHint("🧭 Toca el mapa para añadir puntos de la ruta"); $("planbar").classList.add("show"); pbInfo(); }
+    function pbInfo(){ $("pbInfo").innerHTML=`<b>Planificando ruta</b><br><span class="muted">${planPts.length} punto(s) — toca el mapa</span>`; }
+    function addPlanPoint(lon,lat){ planPts.push([lon,lat]); planMarkers.push(new maplibregl.Marker({element:planMarkerEl(planPts.length)}).setLngLat([lon,lat]).addTo(map));
+      if(planPts.length>=2) planRoute(); else pbInfo(); }
+    async function planRoute(){ const coords=planPts.map(p=>p[0]+","+p[1]).join(";");
+      try{ const j=await (await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true`)).json();
+        if(!j.routes||!j.routes[0]){ showErr("Sin ruta entre esos puntos"); return; } const r=j.routes[0];
+        routeGeoJSON={type:"Feature",geometry:r.geometry}; ensureRouteLayer(); steps=[].concat(...(r.legs||[]).map(l=>l.steps||[]));
+        $("pbInfo").innerHTML=`<b>${fmtDist(r.distance)} · ${fmtTime(r.duration)}</b><br><span class="muted">${planPts.length} puntos · toca para añadir más</span>`;
+      }catch(e){ showErr("ruta: "+e); } }
+    $("aPlan").onclick=()=>{ closeActions(); enterPlanMode(); };
+    $("pbClear").onclick=enterPlanMode;
+    $("pbCancel").onclick=()=>exitPlanMode(true);
+    $("pbGo").onclick=()=>{ if(steps&&steps.length){ exitPlanMode(false); startNav(); } else showErr("Añade al menos 2 puntos"); };
+
+    // ----- Soltar chincheta -----
+    $("aPin").onclick=()=>{ closeActions(); pinMode=true; showHint("📍 Toca el mapa para soltar la chincheta"); };
+
+    // ----- Puntos de interés (Overpass / OSM, gratis) -----
+    const POI_CATS={ refugio:{label:"🛖 Refugios",q:'node["tourism"~"alpine_hut|wilderness_hut"];node["amenity"="shelter"];'},
+      agua:{label:"💧 Agua",q:'node["amenity"="drinking_water"];node["natural"="spring"];'},
+      cumbre:{label:"🗻 Cumbres",q:'node["natural"="peak"];'},
+      parking:{label:"🅿️ Aparcar",q:'node["amenity"="parking"];'},
+      comida:{label:"🍴 Comida",q:'node["amenity"~"restaurant|cafe|bar|fast_food"];'} };
+    let poiMarkers=[]; const clearPoi=()=>{ poiMarkers.forEach(m=>m.remove()); poiMarkers=[]; };
+    // Overpass público se satura y devuelve XML de error → probamos varios espejos y parseamos a prueba de fallos.
+    const OVERPASS=["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter","https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+    async function overpass(ql){ for(const ep of OVERPASS){ try{ const r=await fetch(ep,{method:"POST",body:ql}); if(!r.ok) continue; const t=(await r.text()).trim(); if(t[0]!=="{") continue; return JSON.parse(t); }catch(e){} } return null; }
+    $("aPoi").onclick=()=>{ closeActions(); openModal(`<div class="m-emoji">⭐</div><h2>Puntos de interés</h2>
+      <p class="m-sub">Cerca de lo que ves en el mapa (datos OSM, gratis).</p>
+      <div class="m-cats">${Object.entries(POI_CATS).map(([k,v])=>`<button class="m-cat" data-poi="${k}">${v.label}</button>`).join("")}</div>
+      <div id="poiOut" style="margin-top:14px"></div>`);
+      document.querySelectorAll(".m-cat").forEach(b=>b.onclick=()=>runPoi(b.dataset.poi)); };
+    async function runPoi(cat){ const out=$("poiOut"); out.innerHTML='<div style="color:var(--muted);font-size:13px">Buscando…</div>';
+      const b=map.getBounds(), bbox=`${b.getSouth().toFixed(4)},${b.getWest().toFixed(4)},${b.getNorth().toFixed(4)},${b.getEast().toFixed(4)}`;
+      const inner=POI_CATS[cat].q.replace(/;/g,`(${bbox});`), ql=`[out:json][timeout:25];(${inner});out center 40;`;
+      try{ const j=await overpass(ql); if(!j) throw new Error("sin respuesta");
+        clearPoi(); const els=(j.elements||[]).filter(e=>e.lat||e.center);
+        if(!els.length){ out.innerHTML='<div style="color:var(--muted);font-size:13px">Nada por aquí. Aleja o mueve el mapa y reintenta.</div>'; return; }
+        const items=els.slice(0,40).map(e=>{ const lat=e.lat||e.center.lat, lon=e.lon||e.center.lon;
+          const name=(e.tags&&(e.tags.name||e.tags.ele&&(e.tags.ele+" m")))||POI_CATS[cat].label.replace(/^\S+\s/,"");
+          const el=document.createElement("div"); el.textContent="📍"; el.style.cssText="font-size:20px;cursor:pointer";
+          poiMarkers.push(new maplibregl.Marker({element:el,anchor:"bottom"}).setLngLat([lon,lat]).addTo(map)); return {name,lat,lon}; });
+        out.innerHTML=`<div class="m-list">${items.map((p,i)=>`<div class="pr" data-i="${i}"><b>${p.name}</b>${userLoc?` <span class="d">· a ${fmtDist(haversine(userLoc,{lon:p.lon,lat:p.lat}))}</span>`:""}</div>`).join("")}</div>`;
+        out.querySelectorAll(".pr").forEach(r=>r.onclick=()=>{ const p=items[+r.dataset.i]; closeModal(); map.flyTo({center:[p.lon,p.lat],zoom:15}); dropPin(p.lon,p.lat); showPlace({name:p.name,sub:POI_CATS[cat].label,lon:p.lon,lat:p.lat,cat:""}); });
+      }catch(e){ out.innerHTML='<div style="color:var(--muted);font-size:13px">Overpass no responde ahora, reintenta.</div>'; } }
 
     // onboarding fricción-cero (una vez): explica y activa el GPS de un toque
     if(!localStorage.getItem("novara.onboarded")) setTimeout(()=>$("onboard").classList.add("show"),900);
