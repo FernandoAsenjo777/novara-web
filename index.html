@@ -80,6 +80,12 @@
 
     /* toast de error: se evapora a 2s, no tapa nada */
     #err{ position:fixed; left:50%; bottom:86px; transform:translateX(-50%); z-index:9; background:rgba(150,40,40,.92); color:#ffe3e3; font:12px/1.4 sans-serif; padding:9px 16px; border-radius:14px; display:none; max-width:84%; text-align:center; pointer-events:none; box-shadow:0 4px 16px rgba(0,0,0,.4); }
+
+    /* atribución: obligatoria por licencia, pero colapsada a un (i) discreto (no texto fijo) */
+    .maplibregl-ctrl-attrib.maplibregl-compact:not(.maplibregl-compact-show) .maplibregl-ctrl-attrib-inner{ display:none !important; }
+    .maplibregl-ctrl-attrib{ background:rgba(12,16,14,.45) !important; border-radius:11px !important; font-size:10px; }
+    .maplibregl-ctrl-attrib a, .maplibregl-ctrl-attrib{ color:#7d8a83 !important; }
+    .maplibregl-ctrl-attrib-button{ background-color:rgba(12,16,14,.55) !important; }
   </style>
 </head>
 <body>
@@ -155,7 +161,11 @@
       return STYLES[f]||STYLES.aventura;
     }
 
-    const map=new maplibregl.Map({ container:"map", style:buildStyle("aventura"), center:[-3.70,40.42], zoom:5.4, attributionControl:{compact:true} });
+    const map=new maplibregl.Map({ container:"map", style:buildStyle("aventura"), center:[-3.70,40.42], zoom:5.4, attributionControl:false });
+    // Atribución legal obligatoria (OSM/OpenFreeMap) pero colapsada a un (i) discreto, no un texto fijo.
+    map.addControl(new maplibregl.AttributionControl({ compact:true }), "bottom-right");
+    const collapseAttrib=()=>{ const at=document.querySelector(".maplibregl-ctrl-attrib"); if(at) at.classList.remove("maplibregl-compact-show"); };
+    setTimeout(collapseAttrib,400); setTimeout(collapseAttrib,1500);
     map.on("error", e=>showErr("mapa: "+(e.error&&e.error.message)));
 
     let userLoc=null, dest=null, routeGeoJSON=null, trackGeoJSON=null, pin=null, userMarker=null, steps=[], heading=null;
@@ -178,7 +188,7 @@
     function ensureSendas(){ if(!sendasOn) return;
       if(!map.getSource("sendas")) map.addSource("sendas",{type:"raster",tiles:SENDAS,tileSize:256,attribution:"© Waymarked Trails (CC-BY-SA)"});
       if(!map.getLayer("sendas-layer")) map.addLayer({id:"sendas-layer",type:"raster",source:"sendas",paint:{"raster-opacity":0.85}}); }
-    map.on("style.load", ()=>{ ensureRouteLayer(); ensureTrackLayer(); ensureSendas(); updateCompass(); });
+    map.on("style.load", ()=>{ ensureRouteLayer(); ensureTrackLayer(); ensureSendas(); updateCompass(); collapseAttrib(); });
 
     // ===== brújula (orientación del mapa) + reset norte =====
     function updateCompass(){ $("compassRose").style.transform=`rotate(${-map.getBearing()}deg)`; }
