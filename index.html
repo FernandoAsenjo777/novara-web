@@ -234,35 +234,35 @@
     // ===== Fuentes de mapa: TODO libre (OSM / Sentinel-2 ESA / OpenTopoMap) =====
     const OFM_FONTS="https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf";
     const SAT=["https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg"];
-    // Ortofoto alta resolución de España (IGN PNOA, gratis, ~0,5 m) — encima del Sentinel-2 mundial.
+    // === Ortofotos NACIONALES de alta resolución (gratis), cada una acotada a su país. Van ENCIMA
+    // del Sentinel-2 mundial: donde hay foto nacional se ve NÍTIDO (0,25–0,5 m); fuera, Sentinel-2.
+    // Son JPEG (sin transparencia) → SIN bounds taparían el satélite en blanco fuera de su país. ===
     const PNOA=["https://www.ign.es/wmts/pnoa-ma?Service=WMTS&Request=GetTile&Version=1.0.0&Layer=OI.OrthoimageCoverage&Style=default&Format=image/jpeg&TileMatrixSet=GoogleMapsCompatible&TileMatrix={z}&TileCol={x}&TileRow={y}"];
-    // PNOA es España y en JPEG (sin transparencia): fuera de España devuelve teselas EN BLANCO que
-    // taparían el satélite mundial. Acotamos su carga a España (penín.+Baleares+Canarias) → fuera,
-    // solo Sentinel-2. bounds = [oeste, sur, este, norte].
-    const SPAIN_BOUNDS=[-18.3, 27.5, 4.4, 44.0];
+    const SWISSIMAGE=["https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/3857/{z}/{x}/{y}.jpeg"];
+    const SPAIN_BOUNDS=[-18.3, 27.5, 4.4, 44.0]; // [oeste, sur, este, norte]
+    const HD_ORTHO=[
+      { id:"pnoa",  tiles:PNOA,       maxzoom:19, bounds:SPAIN_BOUNDS,          attribution:"PNOA © IGN España" },          // ~0,5 m
+      { id:"swiss", tiles:SWISSIMAGE, maxzoom:19, bounds:[5.9,45.8,10.6,47.9],  attribution:"SWISSIMAGE © swisstopo" }      // ~0,25 m (Alpes nítidos)
+    ];
     const SENDAS=["https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png"];
     // Aventura = OpenFreeMap "liberty" (vector, con relieve, rápido). OpenTopoMap (raster lento/feo) RETIRADO.
     const STYLES={ aventura:"https://tiles.openfreemap.org/styles/liberty", mapa:"https://tiles.openfreemap.org/styles/bright", noche:"https://tiles.openfreemap.org/styles/dark" };
     // URL TileJSON del planeta vector (OpenFreeMap) — fuente de las cumbres también en satélite.
     const OMT_PLANET="https://tiles.openfreemap.org/planet";
     function satelliteStyle(){
-      // Satélite = raster ligero (Sentinel-2 mundial + PNOA alta-res en España) + una fuente
-      // vectorial dedicada "omt" SOLO para los nombres de cumbres (como hace PeakVisor, gratis).
-      // Las cumbres se añaden luego en ensurePeaks(); aquí solo declaramos la fuente y el orden.
-      return { version:8, glyphs:OFM_FONTS,
-        sources:{
-          // maxzoom cap = clave: Sentinel-2 es 10 m/píxel (máx útil ~z14); sin cap, MapLibre pide
-          // tiles inexistentes a z15+ → 404 → mapa NEGRO. Con maxzoom hace overzoom (estira el
-          // último tile, nunca negro). PNOA (España, 0,5 m) sí llega nítido a z19.
-          sat:{ type:"raster", tiles:SAT, tileSize:256, maxzoom:14, attribution:"Sentinel-2 cloudless · EOX (CC-BY) · ESA" },
-          pnoa:{ type:"raster", tiles:PNOA, tileSize:256, maxzoom:19, bounds:SPAIN_BOUNDS, attribution:"PNOA © Instituto Geográfico Nacional de España" },
-          omt:{ type:"vector", url:OMT_PLANET }
-        },
-        layers:[
-          { id:"bg", type:"background", paint:{ "background-color":"#0c100e" } },
-          { id:"sat", type:"raster", source:"sat" },
-          { id:"pnoa", type:"raster", source:"pnoa", minzoom:7 }
-        ] };
+      // Satélite = Sentinel-2 mundial (maxzoom 14: a z15+ no hay dato → cap para overzoom, nunca negro)
+      // + ortofotos nacionales nítidas encima + fuente vectorial "omt" para los nombres de cumbres.
+      const sources={
+        sat:{ type:"raster", tiles:SAT, tileSize:256, maxzoom:14, attribution:"Sentinel-2 cloudless · EOX (CC-BY) · ESA" },
+        omt:{ type:"vector", url:OMT_PLANET }
+      };
+      const layers=[
+        { id:"bg", type:"background", paint:{ "background-color":"#0c100e" } },
+        { id:"sat", type:"raster", source:"sat" }
+      ];
+      HD_ORTHO.forEach(o=>{ sources[o.id]={ type:"raster", tiles:o.tiles, tileSize:256, maxzoom:o.maxzoom, bounds:o.bounds, attribution:o.attribution };
+        layers.push({ id:o.id, type:"raster", source:o.id, minzoom:7 }); });
+      return { version:8, glyphs:OFM_FONTS, sources, layers };
     }
     function buildStyle(f){ if(f==="satelite") return satelliteStyle(); return STYLES[f]||STYLES.aventura; }
 
@@ -289,13 +289,14 @@
     function ensureSatOverlay(){ const want = is3D && currentFlavor!=="satelite";
       if(want){
         if(!map.getSource("sat3d")) map.addSource("sat3d",{ type:"raster", tiles:SAT, tileSize:256, maxzoom:14, attribution:"Sentinel-2 cloudless · EOX (CC-BY) · ESA" });
-        if(!map.getSource("pnoa3d")) map.addSource("pnoa3d",{ type:"raster", tiles:PNOA, tileSize:256, maxzoom:19, bounds:SPAIN_BOUNDS, attribution:"PNOA © Instituto Geográfico Nacional de España" });
         const before=firstSymbol();
         if(!map.getLayer("sat3d-l")) map.addLayer({ id:"sat3d-l", type:"raster", source:"sat3d" }, before);
-        if(!map.getLayer("pnoa3d-l")) map.addLayer({ id:"pnoa3d-l", type:"raster", source:"pnoa3d", minzoom:7 }, before);
+        HD_ORTHO.forEach(o=>{ const sid=o.id+"3d", lid=o.id+"3d-l";
+          if(!map.getSource(sid)) map.addSource(sid,{ type:"raster", tiles:o.tiles, tileSize:256, maxzoom:o.maxzoom, bounds:o.bounds, attribution:o.attribution });
+          if(!map.getLayer(lid)) map.addLayer({ id:lid, type:"raster", source:sid, minzoom:7 }, before); });
       } else {
-        ["sat3d-l","pnoa3d-l"].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); });
-        ["sat3d","pnoa3d"].forEach(id=>{ if(map.getSource(id)){ try{ map.removeSource(id); }catch(e){} } });
+        ["sat3d-l"].concat(HD_ORTHO.map(o=>o.id+"3d-l")).forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); });
+        ["sat3d"].concat(HD_ORTHO.map(o=>o.id+"3d")).forEach(id=>{ if(map.getSource(id)){ try{ map.removeSource(id); }catch(e){} } });
       } }
     function ensureContours(){ if(!showContours || currentFlavor==="satelite" || is3D){ ["contour-labels","contour-lines"].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); }); return; }
       if(!map.getSource("contours")) map.addSource("contours",{ type:"vector", maxzoom:15, tiles:[ demSource.contourProtocolUrl({ multiplier:1, thresholds:{ 10:[500,2000], 11:[200,1000], 12:[100,500], 13:[100,500], 14:[50,250], 15:[20,100] }, elevationKey:"ele", levelKey:"level", contourLayer:"contours" }) ] });
