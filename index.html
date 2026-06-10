@@ -270,18 +270,19 @@
     map.on("error", e=>showErr("mapa: "+(e.error&&e.error.message)));
 
     // ===== Relieve desde DEM gratis (terrarium): curvas de nivel + hillshade + 3D =====
-    const demSource=new mlcontour.DemSource({ url:"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png", encoding:"terrarium", maxzoom:13, worker:true });
+    const demSource=new mlcontour.DemSource({ url:"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png", encoding:"terrarium", maxzoom:14, worker:true });
     demSource.setupMaplibre(maplibregl);
     let showContours=true, is3D=false, showPeaks=true;
-    function ensureDem(){ if(!map.getSource("dem")) map.addSource("dem",{ type:"raster-dem", encoding:"terrarium", tiles:[demSource.sharedDemProtocolUrl], maxzoom:13, tileSize:256 }); }
+    function ensureDem(){ if(!map.getSource("dem")) map.addSource("dem",{ type:"raster-dem", encoding:"terrarium", tiles:[demSource.sharedDemProtocolUrl], maxzoom:14, tileSize:256 }); }
     function firstSymbol(){ const s=map.getStyle().layers.find(l=>l.type==="symbol"); return s?s.id:undefined; }
     function ensureHillshade(){ if(currentFlavor==="satelite") return; ensureDem(); if(!map.getLayer("hillshade")) map.addLayer({ id:"hillshade", type:"hillshade", source:"dem", minzoom:6, paint:{ "hillshade-exaggeration":0.35 } }, firstSymbol()); }
-    function ensureContours(){ if(!showContours || currentFlavor==="satelite"){ ["contour-labels","contour-lines"].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); }); return; }
+    function ensureContours(){ if(!showContours || currentFlavor==="satelite" || is3D){ ["contour-labels","contour-lines"].forEach(id=>{ if(map.getLayer(id)) map.removeLayer(id); }); return; }
       if(!map.getSource("contours")) map.addSource("contours",{ type:"vector", maxzoom:15, tiles:[ demSource.contourProtocolUrl({ multiplier:1, thresholds:{ 10:[500,2000], 11:[200,1000], 12:[100,500], 13:[100,500], 14:[50,250], 15:[20,100] }, elevationKey:"ele", levelKey:"level", contourLayer:"contours" }) ] });
       const before=firstSymbol();
       if(!map.getLayer("contour-lines")) map.addLayer({ id:"contour-lines", type:"line", source:"contours", "source-layer":"contours", minzoom:10, paint:{ "line-color":"rgba(150,110,70,.55)", "line-width":["match",["get","level"],1,1.4,0.6] } }, before);
       if(!map.getLayer("contour-labels")) map.addLayer({ id:"contour-labels", type:"symbol", source:"contours", "source-layer":"contours", minzoom:12, filter:[">",["get","level"],0], layout:{ "symbol-placement":"line", "text-field":["concat",["to-string",["get","ele"]]," m"], "text-font":["Noto Sans Regular"], "text-size":10, "text-max-angle":25 }, paint:{ "text-color":"#c79a64", "text-halo-color":"#0c100e", "text-halo-width":1 } }); }
-    function applyTerrain(animate){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.3 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(animate && map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky({ "sky-color":"#0c100e","horizon-color":"#0c100e","fog-color":"#0c100e","fog-ground-blend":0,"horizon-fog-blend":0,"sky-horizon-blend":0 }); }catch(e){} } }
+    function applyTerrain(animate){ if(is3D){ ensureDem(); map.setTerrain({ source:"dem", exaggeration:1.45 }); try{ if(map.setSky) map.setSky({ "sky-color":"#a3c6e6", "horizon-color":"#d6e4f0", "fog-color":"#e6eef5", "fog-ground-blend":0.5 }); }catch(e){} if(animate && map.getPitch()<30) map.easeTo({ pitch:62 }); } else { try{ map.setTerrain(null); }catch(e){} try{ if(map.setSky) map.setSky({ "sky-color":"#0c100e","horizon-color":"#0c100e","fog-color":"#0c100e","fog-ground-blend":0,"horizon-fog-blend":0,"sky-horizon-blend":0 }); }catch(e){} }
+      ensureContours(); } // en 3D ocultamos las curvas (sobre el relieve parecen terrazas); al salir, vuelven
     // Cumbres: nombre + altitud de los picos (datos OSM, gratis) — lo que PeakVisor cobra
     function peakSource(){ const s=map.getStyle().sources||{}; return s.openmaptiles?"openmaptiles":(s.omt?"omt":null); }
     function ensurePeaks(){ if(!showPeaks){ if(map.getLayer("peaks")) map.removeLayer("peaks"); return; }
